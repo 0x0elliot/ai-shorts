@@ -1,10 +1,3 @@
-# TO do
-- [ ] Send "campaign" notification on the fly
-- [ ] SMS abandoned cart automation
-- [ ] WhatsApp abandoned cart automation
-- [ ] Email abandoned cart automation
-- [ ] Web push notification abandoned cart automation
+# There is hope
 
-# Thoughts
-
-- How about making a "shop" the tenant of the app?
+shortsgenerator.com has been catching traction online. Let's ride the trend and make a competitor.

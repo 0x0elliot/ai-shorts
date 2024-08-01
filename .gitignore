@@ -1,0 +1,6 @@
+data/**
+**/node_modules/**
+yarn.lock
+.env
+.DS_Store
+**/gcp_credentials.json

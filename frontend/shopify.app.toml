@@ -1,0 +1,23 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "199b65fbc8cc99165515cfbc9c992f19"
+name = "acid-rain-whatsapp-automation"
+handle = "acid-rain-whatsapp-automation"
+application_url = "https://localhost:3000/"
+embedded = false
+
+[build]
+include_config_on_deploy = true
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = [ "https://localhost:3000/", "http://localhost:3000/api/user/shopify/callback" , "http://localhost:3000/shopify/callback" ]
+
+[webhooks]
+api_version = "2024-07"
+
+[pos]
+embedded = false

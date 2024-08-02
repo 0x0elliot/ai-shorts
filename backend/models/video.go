@@ -28,6 +28,7 @@ type Video struct {
 	VideoGenerated  bool `json:"videoGenerated" gorm:"default:false"`
 	VideoUploaded   bool `json:"videoUploaded" gorm:"default:false"`
 
+	// maybe, hide this from the user
 	Error 		  string `json:"error" gorm:"null"`
 
 	TTSURL           string `json:"ttsURL" gorm:"null"`

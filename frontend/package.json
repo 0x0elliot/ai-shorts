@@ -52,6 +52,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
     "date-fns": "^3.6.0",
+    "framer-motion": "^11.3.21",
     "i18n-iso-countries": "^7.11.2",
     "img-resize-tiptap-extension": "^1.0.8",
     "libphonenumber-js": "^1.11.3",

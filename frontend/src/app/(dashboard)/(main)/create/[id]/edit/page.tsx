@@ -5,6 +5,8 @@ import { Card, CardContent } from "@/components/ui/card"
 import { useToast } from "@/components/ui/use-toast"
 import { parseCookies } from 'nookies'
 import { siteConfig } from '@/app/siteConfig'
+import { motion } from 'framer-motion'
+import confetti from 'canvas-confetti'
 
 export default function EditCreate() {
     const { toast } = useToast()
@@ -12,30 +14,38 @@ export default function EditCreate() {
     
     const [progress, setProgress] = useState(0)
     const [error, setError] = useState(null)
+    const [status, setStatus] = useState('Brewing your video magic...')
     const intervalRef = useRef(null)
 
     const determineProgress = (video) => {
         if (video.error) {
             setError(video.error)
             setProgress(0)
+            setStatus('Oops! Our magic wand misfired!')
             return
         }
-        if (video.videoUploaded) setProgress(100)
-        else if (video.videoGenerated) setProgress(90)
-        else if (video.videoStitched) setProgress(80)
-        else if (video.ttsGenerated) setProgress(60)
-        else if (video.dallePromptGenerated) setProgress(40)
-        else if (video.scriptGenerated) setProgress(20)
-        else if (video.script) setProgress(15)
-        else setProgress(0)
+        if (video.videoUploaded) {
+            setProgress(100)
+            setStatus('Ta-da! Your video masterpiece is ready!')
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+            })
+        }
+        else if (video.videoGenerated) { setProgress(90); setStatus('Putting the finishing touches...') }
+        else if (video.videoStitched) { setProgress(80); setStatus('Stitching frames like a video tailor!') }
+        else if (video.ttsGenerated) { setProgress(60); setStatus('Teaching robots to talk like humans...') }
+        else if (video.dallePromptGenerated) { setProgress(40); setStatus('Summoning the AI art genies...') }
+        else if (video.scriptGenerated) { setProgress(20); setStatus('Crafting a blockbuster script...') }
+        else if (video.script) { setProgress(15); setStatus('Decoding your brilliant ideas...') }
+        else { setProgress(0); setStatus('Warming up our creative engines...') }
     }
 
     useEffect(() => {
         const cookies = parseCookies()
         const access_token = cookies.access_token
-
         const fetchProgress = () => {
-            // fetch(`/api/video/private/${id}`, {
             fetch(`${siteConfig.baseApiUrl}/api/video/private/${id}`, {
                 headers: {
                     'Authorization': `Bearer ${access_token}`
@@ -53,15 +63,12 @@ export default function EditCreate() {
                 toast({
                     variant: 'destructive',
                     title: 'Error',
-                    description: 'Failed to get video progress'
+                    description: 'Our crystal ball is foggy. Retry in a bit!'
                 })
             })
         }
-
         fetchProgress() // Initial fetch
-
         intervalRef.current = setInterval(fetchProgress, 5000)
-
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current)
         }
@@ -69,29 +76,58 @@ export default function EditCreate() {
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-8">
-            <section className="text-center mb-12">
+            <motion.section 
+                initial={{ opacity: 0, y: -20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5 }}
+                className="text-center mb-12"
+            >
                 <h1 className="text-4xl font-bold text-gray-900 dark:text-gray-50 mb-4">
-                    Edit Your Video Magic
+                    🎬 Lights, Camera, AI-ction!
                 </h1>
                 <p className="text-xl text-gray-600 dark:text-gray-300">
-                    Make changes to your video schedule
+                    Your video is in the making. Grab some popcorn!
                 </p>
-            </section>
+            </motion.section>
             <Card>
                 <CardContent className="p-6">
                     {error ? (
-                        <p className="text-red-500">Error: {error}</p>
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="text-center"
+                        >
+                            <p className="text-red-500 text-lg mb-4">Whoops! We hit a snag in our magic trick:</p>
+                            <p className="text-red-400">{error}</p>
+                            <p className="mt-4 text-gray-600">Don't worry, our team of wizard debuggers is on it!</p>
+                        </motion.div>
                     ) : (
-                        <div>
-                            <p className="text-lg mb-2">Video Progress:</p>
-                            <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                                <div 
-                                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-500" 
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="text-center"
+                        >
+                            <p className="text-lg mb-4 font-semibold text-blue-600 dark:text-blue-400">{status}</p>
+                            <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 mb-4">
+                                <motion.div 
+                                    className="bg-blue-600 h-4 rounded-full transition-all duration-500" 
                                     style={{width: `${progress}%`}}
-                                ></div>
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${progress}%` }}
+                                />
                             </div>
-                            <p className="mt-2">{progress}% Complete</p>
-                        </div>
+                            <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{progress}% Complete</p>
+                            {progress === 100 && (
+                                <motion.p
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.5 }}
+                                    className="mt-4 text-green-500 font-semibold"
+                                >
+                                    🎉 Bravo! Your video is ready for its debut!
+                                </motion.p>
+                            )}
+                        </motion.div>
                     )}
                 </CardContent>
             </Card>

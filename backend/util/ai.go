@@ -11,6 +11,7 @@ import (
 	"io"
 	"bytes"
 	"encoding/base64"
+	"io/ioutil"
 
 	models "go-authentication-boilerplate/models"
 
@@ -38,8 +39,24 @@ type SentencePrompt struct {
 	Sentence string
 	Prompt   string
 }
+
+func SaveVideoError(video *models.Video, err error) error {
+	video.Error = err.Error()
+	_, err = SetVideo(video)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func CreateVideo(video *models.Video) (*models.Video, error) {
 	client := openai.NewClient(OPENAI_API_KEY)
+	storageClient, err := GetGCPClient("/Users/aditya/Documents/OSS/zappush/shortpro/backend/gcp_credentials.json")
+	if err != nil {
+		log.Printf("[ERROR] Error creating storage client: %v", err)
+		return nil, err
+	}
 
 	cleanedtopic, script, err := processContent(client, video.Topic, video.Description)
 	if err != nil {
@@ -58,12 +75,14 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 	video, err = SetVideo(video)
 	if err != nil {
 		log.Printf("[ERROR] Error saving video: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
 	prompts, err := generateDallEPromptsForScript(client, video.Script, DefaultStyle)
 	if err != nil {
 		log.Printf("[ERROR] Error generating DALL-E prompts: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
@@ -73,6 +92,7 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 	video, err = SetVideo(video)
 	if err != nil {
 		log.Printf("[ERROR] Error saving video: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
@@ -82,32 +102,132 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 	// now, we can create the image
 	// Create a new context and storage client
 	ctx := context.Background()
-	storageClient, err := storage.NewClient(ctx)
 	if err != nil {
 		log.Printf("[ERROR] Error creating storage client: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
-	bucketName := os.Getenv("ACIDRAIN_BUCKET_NAME")
+	bucketName := os.Getenv("ACIDRAIN_GCP_BUCKET_NAME")
 	videoID := video.ID
 
 	_, err = generateImagesForScript(ctx, client, storageClient, bucketName, videoID, prompts, DefaultStyle)
 	if err != nil {
 		log.Printf("[ERROR] Error generating images: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
-	video.Progress = 50
+	video.Progress = 60
 	video.DALLEGenerated = true
 
 	video, err = SetVideo(video)
 	if err != nil {
 		log.Printf("[ERROR] Error saving video: %v", err)
+		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
+	_, err = generateTTSForScript(ctx, client, storageClient, bucketName, videoID, video.Script, video.Narrator)
+	if err != nil {
+		log.Printf("[ERROR] Error generating TTS: %v", err)
+		_ = SaveVideoError(video, err)
+		return nil, err
+	}
+
+	video.Progress = 70
+	video.TTSGenerated = true
+
+	video, err = SetVideo(video)
+	if err != nil {
+		log.Printf("[ERROR] Error saving video: %v", err)
+		_ = SaveVideoError(video, err)
+		return nil, err
+	}
 
 	return video, nil
+}
+
+func generateTTSForScript(ctx context.Context, client *openai.Client, storageClient *storage.Client, bucketName, videoID string, script string, narrator string) (string, error) {
+	audioData, err := generateTTSForFullScript(client, script, narrator)
+	if err != nil {
+		return "", fmt.Errorf("error generating TTS for script: %v", err)
+	}
+
+	bucket := storageClient.Bucket(bucketName)
+	folderPath := path.Join("videos", videoID, "audio")
+
+	// Save the audio to the bucket
+	filename := "full_audio.mp3"
+	objectPath := path.Join(folderPath, filename)
+	audioURL, err := saveAudioToBucket(ctx, bucket, objectPath, audioData)
+	if err != nil {
+		return "", fmt.Errorf("error saving audio to bucket: %v", err)
+	}
+
+	return audioURL, nil
+}
+
+func generateTTSForFullScript(client *openai.Client, script, narrator string) ([]byte, error) {
+	req := openai.CreateSpeechRequest{
+		Model: openai.TTSModel1,
+		Input: script,
+		Voice: openai.VoiceAlloy, // Default voice, adjust based on narrator preference
+	}
+
+	// Map narrator to OpenAI voice options
+	switch narrator {
+	case "alloy":
+		req.Voice = openai.VoiceAlloy
+	case "echo":
+		req.Voice = openai.VoiceEcho
+	case "fable":
+		req.Voice = openai.VoiceFable
+	case "onyx":
+		req.Voice = openai.VoiceOnyx
+	case "nova":
+		req.Voice = openai.VoiceNova
+	case "shimmer":
+		req.Voice = openai.VoiceShimmer
+	}
+
+	resp, err := client.CreateSpeech(context.Background(), req)
+	if err != nil {
+		return nil, fmt.Errorf("speech creation failed: %v", err)
+	}
+
+	audioData, err := ioutil.ReadAll(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read audio data: %v", err)
+	}
+
+	return audioData, nil
+}
+
+func saveAudioToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, audioData []byte) (string, error) {
+	obj := bucket.Object(objectPath)
+	writer := obj.NewWriter(ctx)
+	writer.ContentType = "audio/mpeg"
+
+	if _, err := writer.Write(audioData); err != nil {
+		return "", fmt.Errorf("failed to write audio data to bucket: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("failed to close writer: %v", err)
+	}
+
+	// Make the object publicly accessible
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		return "", fmt.Errorf("failed to set ACL: %v", err)
+	}
+
+	// Get the public URL
+	attrs, err := obj.Attrs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get object attributes: %v", err)
+	}
+
+	return attrs.MediaLink, nil
 }
 
 func generateImagesForScript(ctx context.Context, client *openai.Client, storageClient *storage.Client, bucketName, videoID string, sentencePrompts []SentencePrompt, style ImageStyle) ([]GeneratedImage, error) {
@@ -208,89 +328,105 @@ func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, object
 
 
 func generateDallEPromptsForScript(client *openai.Client, script string, style ImageStyle) ([]SentencePrompt, error) {
-	// strip all emojis away from the script
-	script = StripEmoji(script)
+    // Strip all emojis away from the script
+    script = StripEmoji(script)
+    sentences := splitIntoSentences(script)
 
-	sentences := splitIntoSentences(script)
-	var results []SentencePrompt
+    functionDescription := openai.FunctionDefinition{
+        Name:        "generate_dalle_prompts",
+        Description: "Generate DALL-E 3 prompts for multiple sentences",
+        Parameters: json.RawMessage(`{
+            "type": "object",
+            "properties": {
+                "prompts": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "sentence": {
+                                "type": "string",
+                                "description": "The original sentence from the script"
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "description": "A detailed prompt for DALL-E 3 to generate an image based on the sentence and style"
+                            }
+                        },
+                        "required": ["sentence", "prompt"]
+                    }
+                }
+            },
+            "required": ["prompts"]
+        }`),
+    }
 
-	for _, sentence := range sentences {
-		prompt, err := generateDallEPromptForSentence(client, sentence, style)
-		if err != nil {
-			return nil, fmt.Errorf("error generating prompt for sentence '%s': %v", sentence, err)
-		}
-		results = append(results, SentencePrompt{Sentence: sentence, Prompt: prompt})
-	}
+    styleInstruction := getStyleInstruction(style)
+    
+    // Prepare the sentences as a formatted string
+    formattedSentences := ""
+    for i, sentence := range sentences {
+        formattedSentences += fmt.Sprintf("%d. %s\n", i+1, sentence)
+    }
 
-	return results, nil
-}
+    resp, err := client.CreateChatCompletion(
+        context.Background(),
+        openai.ChatCompletionRequest{
+            Model: openai.GPT4,
+            Messages: []openai.ChatCompletionMessage{
+                {
+                    Role:    openai.ChatMessageRoleSystem,
+                    Content: "You are an AI assistant specialized in creating prompts for DALL-E 3 image generation based on sentences from a video script.",
+                },
+                {
+                    Role: openai.ChatMessageRoleUser,
+                    Content: fmt.Sprintf(`Generate detailed DALL-E 3 prompts for each of the following sentences from a video script. 
+                        Each prompt should describe a single, striking image that captures the essence of the corresponding sentence. 
+                        %s
+                        Focus on visual elements, colors, and composition. The prompts should be descriptive but concise.
+                        
+                        Sentences:
+                        %s`, styleInstruction, formattedSentences),
+                },
+            },
+            Functions: []openai.FunctionDefinition{
+                functionDescription,
+            },
+            FunctionCall: openai.FunctionCall{
+                Name: "generate_dalle_prompts",
+            },
+        },
+    )
 
-func generateDallEPromptForSentence(client *openai.Client, sentence string, style ImageStyle) (string, error) {
-	functionDescription := openai.FunctionDefinition{
-		Name:        "generate_dalle_prompt",
-		Description: "Generate a DALL-E 3 prompt based on the given sentence and style",
-		Parameters: json.RawMessage(`{
-			"type": "object",
-			"properties": {
-				"prompt": {
-					"type": "string",
-					"description": "A detailed prompt for DALL-E 3 to generate an image based on the sentence and style"
-				}
-			},
-			"required": ["prompt"]
-		}`),
-	}
+    if err != nil {
+        return nil, fmt.Errorf("error creating chat completion: %v", err)
+    }
 
-	styleInstruction := getStyleInstruction(style)
+    if len(resp.Choices) == 0 {
+        return nil, fmt.Errorf("no choices returned from the API")
+    }
 
-	resp, err := client.CreateChatCompletion(
-		context.Background(),
-		openai.ChatCompletionRequest{
-			Model: openai.GPT4o,
-			Messages: []openai.ChatCompletionMessage{
-				{
-					Role:    openai.ChatMessageRoleSystem,
-					Content: "You are an AI assistant specialized in creating prompts for DALL-E 3 image generation based on individual sentences from a video script.",
-				},
-				{
-					Role: openai.ChatMessageRoleUser,
-					Content: fmt.Sprintf(`Generate a detailed DALL-E 3 prompt based on the following sentence from a video script. 
-						The prompt should describe a single, striking image that captures the essence of the sentence. 
-						%s
-						Focus on visual elements, colors, and composition. The prompt should be descriptive but concise.
+    functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
 
-						Sentence:
-						%s`, styleInstruction, sentence),
-				},
-			},
-			Functions: []openai.FunctionDefinition{
-				functionDescription,
-			},
-			FunctionCall: openai.FunctionCall{
-				Name: "generate_dalle_prompt",
-			},
-		},
-	)
+    var result struct {
+        Prompts []SentencePrompt `json:"prompts"`
+    }
+    err = json.Unmarshal([]byte(functionArgs), &result)
+    if err != nil {
+        return nil, fmt.Errorf("error parsing AI response: %v", err)
+    }
 
-	if err != nil {
-		return "", fmt.Errorf("error creating chat completion: %v", err)
-	}
+    // Ensure the order of prompts matches the order of sentences
+    orderedPrompts := make([]SentencePrompt, len(sentences))
+    for _, prompt := range result.Prompts {
+        for i, sentence := range sentences {
+            if prompt.Sentence == sentence {
+                orderedPrompts[i] = prompt
+                break
+            }
+        }
+    }
 
-	if len(resp.Choices) == 0 {
-		return "", fmt.Errorf("no choices returned from the API")
-	}
-
-	functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
-
-	var result struct {
-		Prompt string `json:"prompt"`
-	}
-	err = json.Unmarshal([]byte(functionArgs), &result)
-	if err != nil {
-		return "", fmt.Errorf("error parsing AI response: %v", err)
-	}
-
-	return result.Prompt, nil
+    return orderedPrompts, nil
 }
 
 func getStyleInstruction(style ImageStyle) string {

@@ -22,6 +22,15 @@ func InitializeGCP(projectID, bucketName, creds string) (*storage.Client, error)
 	return client, nil
 }
 
+func GetGCPClient(creds string) (*storage.Client, error) {
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx, option.WithCredentialsFile(creds))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GCP client: %v", err)
+	}
+	return client, nil
+}
+
 
 // UploadImageToGCP uploads a base64 encoded image to GCP and returns the URL.
 func UploadImageToGCP(client *storage.Client, bucketName, objectName, base64Image string) (string, error) {

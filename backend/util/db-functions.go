@@ -16,19 +16,29 @@ func GetUserById(id string) (*models.User, error) {
 	return user, nil
 }
 
+func GetVideoById(id string) (*models.Video, error) {
+	video := new(models.Video)
+	txn := db.DB.Where("id = ?", id).Preload("Owner").First(&video)
+	if txn.Error != nil {
+		log.Printf("[ERROR] Error getting video: %v", txn.Error)
+		return nil, txn.Error
+	}
+	return video, nil
+}
+
 func SetVideo(video *models.Video) (*models.Video, error) {
 	// check if video with ID exists
 	if video.ID == "" {
 		video.CreatedAt = db.DB.NowFunc().String()
 		video.UpdatedAt = db.DB.NowFunc().String()
-		txn := db.DB.Create(video)
+		txn := db.DB.Omit("Owner").Create(video)
 		if txn.Error != nil {
 			log.Printf("[ERROR] Error creating video: %v", txn.Error)
 			return video, txn.Error
 		}
 	} else {
 		video.UpdatedAt = db.DB.NowFunc().String()
-		txn := db.DB.Save(video)
+		txn := db.DB.Omit("Owner").Save(video)
 		if txn.Error != nil {
 			log.Printf("[ERROR] Error saving video: %v", txn.Error)
 			return video, txn.Error

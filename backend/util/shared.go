@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+func StripEmoji(s string) string {
+	// https://stackoverflow.com/a/13785978/13201408
+	var newRunes []rune
+	for _, r := range s {
+		if r > 0x7F {
+			continue
+		}
+		newRunes = append(newRunes, r)
+	}
+	return string(newRunes)
+}
+
 func Contains(arr []string, str string) bool {
 	
 	for _, a := range arr {

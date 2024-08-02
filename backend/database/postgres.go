@@ -68,5 +68,6 @@ func ConnectToDB() {
 	DB.AutoMigrate(
 		&models.User{}, 
 		&models.Claims{},
+		&models.Video{},
 	)
 }

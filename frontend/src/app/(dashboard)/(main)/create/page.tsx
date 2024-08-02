@@ -1,5 +1,5 @@
 "use client"
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { siteConfig } from "@/app/siteConfig"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,12 +11,17 @@ import { Button } from "@/components/ui/button"
 import { Icon } from '@iconify/react'
 import { toast } from "@/components/ui/use-toast"
 
+import cookies from 'nookies';
+import axios from 'axios'
+
 export default function Create() {
+    const [accessToken, setAccessToken] = useState("");
+
     const [topic, setTopic] = useState('')
     const [description, setDescription] = useState('')
-    const [voice, setVoice] = useState('p251') // Edward as default
+    const [voice, setVoice] = useState('onyx') // Edward as default
     const [videoStyle, setVideoStyle] = useState('default')
-    const [postingSchedule, setPostingSchedule] = useState(['email']) // Email me as default
+    const [postingMethod, setPostingMethod] = useState(['email']) // Email me as default
     const [isOneTime, setIsOneTime] = useState(true) // One time video on by default
     const [selectedStyle, setSelectedStyle] = useState('default')
     const audioRef = useRef(null)
@@ -28,20 +33,16 @@ export default function Create() {
         { name: 'Cartoon', description: 'Fun and playful animated style' },
     ]
 
+    // instead, the narrators are openai narrators
     const narrators = [
-        { name: "Edward", value: "p230", description: "Friendly and approachable" },
-        { name: "Elena", value: "p248", description: "Warm and professional" },
-        { name: "Oliver", value: "p251", description: "Charming British accent" },
-        { name: "James", value: "p254", description: "Deep and authoritative" },
-        { name: "William", value: "p256", description: "Refined British tone" },
-        { name: "Charlotte", value: "p260", description: "Elegant British accent" },
-        { name: "Sophia", value: "p263", description: "Energetic and engaging" },
-        { name: "Michael", value: "p264", description: "Rich and resonant" },
-        { name: "Daniel", value: "p267", description: "Serious and professional" },
-        { name: "Emily", value: "p273", description: "Polished British accent" },
-        { name: "Thomas", value: "p282", description: "Soothing and calming" },
-        { name: "Priya", value: "p345", description: "Warm with a subtle accent" }
+        { name: 'alloy', value: "alloy", description: 'Male, confident and friendly.' },
+        { name: "echo", value: "echo", description: 'Male, Confident. You would want to listen to him.' },
+        { name: "fable", value: "fable", description: 'Male, Ready to tell your story.' },
+        { name: "onyx", value: "onyx", description: "Male, Deep and confident." },
+        { name: "nova", value: "nova", description: 'Female, confident and friendly.' },
+        { name: "shimmer", value: "shimmer", description: 'Female, calm and soothing.' },
     ]
+
 
     const scheduleOptions = [
         { id: 'email', label: 'Email me', icon: 'ph:envelope-simple' },
@@ -50,8 +51,13 @@ export default function Create() {
         { id: 'instagram', label: 'Post as Instagram Short', icon: 'ph:instagram-logo' },
     ]
 
+    useEffect(() => {
+        let accessToken = cookies.get(null).access_token;
+        setAccessToken(accessToken);
+    }, []);
+
     const handleScheduleChange = (id) => {
-        setPostingSchedule(prev =>
+        setPostingMethod(prev =>
             prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
         )
     }
@@ -62,7 +68,7 @@ export default function Create() {
             audioRef.current.currentTime = 0
             const selectedNarrator = narrators.find(n => n.value === voice)
             if (selectedNarrator) {
-                const audioPath = `/audio/${selectedNarrator.name}.wav`
+                const audioPath = `/audio/${selectedNarrator.name}.mp3`
                 audioRef.current.src = audioPath
                 audioRef.current.play()
             }
@@ -71,7 +77,7 @@ export default function Create() {
 
 
     const handleSubmit = () => {
-        if (!topic || !description || !voice || !videoStyle || postingSchedule.length === 0) {
+        if (!topic || !description || !voice || !videoStyle || postingMethod.length === 0) {
             toast({
                 title: "Error",
                 description: "Please fill in all fields before submitting.",
@@ -81,23 +87,39 @@ export default function Create() {
         }
 
         const requestData = {
-            topic,
-            description,
+            topic: topic,
+            description: description,
             narrator: voice.toLowerCase(),
             videoStyle: videoStyle.toLowerCase(),
-            postingSchedule,
-            isOneTime
+            postingMethod: postingMethod,
+            isOneTime: isOneTime,
         }
 
-        
+        // make a request to /api/video/create 
+        // with the requestData using axios
+        axios.post(`${siteConfig.baseApiUrl}/api/video/private/create`, requestData, {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+            },
+        }).then((response) => {
+            // Here you would typically send this data to your API
+            toast({
+                title: "Success",
+                description: "Your video schedule has been created!",
+            })
 
+        }).catch((error) => {
+            if (error.response.status === 401) {
+                window.location.href = '/logout';
+            }
 
-        console.log('Request Data:', requestData)
-        // Here you would typically send this data to your API
-        toast({
-            title: "Success",
-            description: "Your video schedule has been created!",
-        })
+            toast({
+                title: "Error",
+                description: "An error occurred while creating your video schedule.",
+                variant: "destructive",
+            })
+        });
     }
 
     return (
@@ -181,8 +203,8 @@ export default function Create() {
                                 <div
                                     key={style.name.toLowerCase()}
                                     className={`relative p-4 border-2 rounded-lg cursor-pointer transition-all ${selectedStyle === style.name.toLowerCase()
-                                            ? 'border-blue-500 bg-blue-100 dark:bg-blue-900'
-                                            : 'border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                        ? 'border-blue-500 bg-blue-100 dark:bg-blue-900'
+                                        : 'border-gray-200 bg-white dark:bg-gray-800 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
                                         }`}
                                     onClick={() => {
                                         setSelectedStyle(style.name.toLowerCase())
@@ -191,14 +213,14 @@ export default function Create() {
                                 >
                                     <div className="flex flex-col items-center justify-center text-center h-full">
                                         <span className={`font-medium text-lg mb-2 ${selectedStyle === style.name.toLowerCase()
-                                                ? 'text-blue-600 dark:text-blue-400'
-                                                : ''
+                                            ? 'text-blue-600 dark:text-blue-400'
+                                            : ''
                                             }`}>
                                             {style.name}
                                         </span>
                                         <span className={`text-sm ${selectedStyle === style.name.toLowerCase()
-                                                ? 'text-blue-600 dark:text-blue-400'
-                                                : 'text-gray-500 dark:text-gray-400'
+                                            ? 'text-blue-600 dark:text-blue-400'
+                                            : 'text-gray-500 dark:text-gray-400'
                                             }`}>
                                             {style.description}
                                         </span>
@@ -218,7 +240,7 @@ export default function Create() {
                                 <div key={option.id} className="flex items-center space-x-2 bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                                     <Checkbox
                                         id={option.id}
-                                        checked={postingSchedule.includes(option.id)}
+                                        checked={postingMethod.includes(option.id)}
                                         onCheckedChange={() => handleScheduleChange(option.id)}
                                         className="h-5 w-5"
                                     />

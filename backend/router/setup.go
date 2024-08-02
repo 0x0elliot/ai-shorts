@@ -7,6 +7,7 @@ import (
 )
 
 var USER fiber.Router
+var VIDEO fiber.Router
 
 func SetupRoutes(app *fiber.App) {
 	app.Use(logger.New())
@@ -18,15 +19,12 @@ func SetupRoutes(app *fiber.App) {
 		AllowCredentials: true,
 	}))
 
-	// this is just for testing with shopify
-	// remember that in production we will be using app proxies
-	app.Static("/public", "./public", fiber.Static{
-		Compress:  true,
-		ByteRange: true,
-	})
-
 	api := app.Group("/api")
 
 	USER = api.Group("/user")
 	SetupUserRoutes()
+
+	VIDEO = api.Group("/video")
+	SetupVideoRoutes()
+
 }

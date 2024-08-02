@@ -16,6 +16,28 @@ func GetUserById(id string) (*models.User, error) {
 	return user, nil
 }
 
+func SetVideo(video *models.Video) (*models.Video, error) {
+	// check if video with ID exists
+	if video.ID == "" {
+		video.CreatedAt = db.DB.NowFunc().String()
+		video.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Create(video)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error creating video: %v", txn.Error)
+			return video, txn.Error
+		}
+	} else {
+		video.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Save(video)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error saving video: %v", txn.Error)
+			return video, txn.Error
+		}
+	}
+
+	return video, nil
+}
+
 func SetUser(user *models.User) (*models.User, error) {
 	// check if user with ID exists
 	if user.ID == "" {

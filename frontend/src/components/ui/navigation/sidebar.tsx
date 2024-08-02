@@ -3,7 +3,8 @@ import { siteConfig } from "@/app/siteConfig"
 import { cx, focusRing } from "@/lib/utils"
 import {
   RiHome2Line,
-  RiLinkM
+  RiLinkM,
+  RiSparkling2Fill
 } from "@remixicon/react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -16,8 +17,7 @@ import { UserProfileDesktop, UserProfileMobile } from "./UserProfile"
 
 const navigation = [
   { name: "Dashboard", href: siteConfig.baseLinks.dashboard, icon: RiHome2Line },
-  { name: "Create", href: siteConfig.baseLinks.create, icon: RiLinkM },
-
+  { name: "Create", href: siteConfig.baseLinks.create, icon:  RiSparkling2Fill },
   {
     name: "Discord",
     href: "https://discord.gg/y6yPVWjdD9",

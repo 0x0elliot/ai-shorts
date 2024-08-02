@@ -7,10 +7,15 @@ import (
 	"log"
 	"os"
 	"strings"
+	"path"
+	"io"
+	"bytes"
+	"encoding/base64"
 
 	models "go-authentication-boilerplate/models"
 
 	openai "github.com/sashabaranov/go-openai"
+	storage "cloud.google.com/go/storage"
 )
 
 var OPENAI_API_KEY = os.Getenv("ACIDRAIN_OPENAI_KEY")
@@ -23,6 +28,11 @@ const (
 	CartoonStyle    ImageStyle = "cartoon"
 	WatercolorStyle ImageStyle = "watercolor"
 )
+
+type GeneratedImage struct {
+	Sentence string
+	ImageURL string
+}
 
 type SentencePrompt struct {
 	Sentence string
@@ -42,6 +52,8 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 	video.Script = script
 	video.ScriptGenerated = true
 
+	video.Progress = 10
+
 	// Save the video to the database
 	video, err = SetVideo(video)
 	if err != nil {
@@ -55,13 +67,145 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 		return nil, err
 	}
 
+	video.Progress = 25
+	video.DALLEPromptGenerated = true
+
+	video, err = SetVideo(video)
+	if err != nil {
+		log.Printf("[ERROR] Error saving video: %v", err)
+		return nil, err
+	}
+
 	log.Printf("Generated %d prompts for the video script", len(prompts))
 	log.Printf("prompts: %v", prompts)
 
 	// now, we can create the image
+	// Create a new context and storage client
+	ctx := context.Background()
+	storageClient, err := storage.NewClient(ctx)
+	if err != nil {
+		log.Printf("[ERROR] Error creating storage client: %v", err)
+		return nil, err
+	}
+
+	bucketName := os.Getenv("ACIDRAIN_BUCKET_NAME")
+	videoID := video.ID
+
+	_, err = generateImagesForScript(ctx, client, storageClient, bucketName, videoID, prompts, DefaultStyle)
+	if err != nil {
+		log.Printf("[ERROR] Error generating images: %v", err)
+		return nil, err
+	}
+
+	video.Progress = 50
+	video.DALLEGenerated = true
+
+	video, err = SetVideo(video)
+	if err != nil {
+		log.Printf("[ERROR] Error saving video: %v", err)
+		return nil, err
+	}
+
 
 	return video, nil
 }
+
+func generateImagesForScript(ctx context.Context, client *openai.Client, storageClient *storage.Client, bucketName, videoID string, sentencePrompts []SentencePrompt, style ImageStyle) ([]GeneratedImage, error) {
+	var generatedImages []GeneratedImage
+
+	bucket := storageClient.Bucket(bucketName)
+	folderPath := path.Join("videos", videoID)
+
+	for i, sp := range sentencePrompts {
+		imageData, err := generateImageForPrompt(client, sp.Prompt, style)
+		if err != nil {
+			return nil, fmt.Errorf("error generating image for prompt %d: %v", i+1, err)
+		}
+
+		// Save the image to the bucket
+		filename := fmt.Sprintf("image_%d.png", i+1)
+		objectPath := path.Join(folderPath, filename)
+		imageURL, err := saveImageToBucket(ctx, bucket, objectPath, imageData)
+		if err != nil {
+			return nil, fmt.Errorf("error saving image %d to bucket: %v", i+1, err)
+		}
+
+		generatedImages = append(generatedImages, GeneratedImage{
+			Sentence: sp.Sentence,
+			ImageURL: imageURL,
+		})
+	}
+
+	return generatedImages, nil
+}
+
+func generateImageForPrompt(client *openai.Client, prompt string, style ImageStyle) ([]byte, error) {
+	stylePrompt := getStylePrompt(style)
+	fullPrompt := fmt.Sprintf("%s %s", stylePrompt, prompt)
+
+	req := openai.ImageRequest{
+		Prompt:         fullPrompt,
+		Size:           openai.CreateImageSize1024x1024,
+		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
+		N:              1,
+	}
+
+	resp, err := client.CreateImage(context.Background(), req)
+	if err != nil {
+		return nil, fmt.Errorf("image creation failed: %v", err)
+	}
+
+	if len(resp.Data) == 0 {
+		return nil, fmt.Errorf("no image data received")
+	}
+
+	imgBytes, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode image data: %v", err)
+	}
+
+	return imgBytes, nil
+}
+
+func getStylePrompt(style ImageStyle) string {
+	switch style {
+	case AnimeStyle:
+		return "Create an anime style image of"
+	case CartoonStyle:
+		return "Create a cartoon style image of"
+	case WatercolorStyle:
+		return "Create a watercolor style painting of"
+	default:
+		return "Create a realistic, detailed image of"
+	}
+}
+
+func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, imageData []byte) (string, error) {
+	obj := bucket.Object(objectPath)
+	writer := obj.NewWriter(ctx)
+	writer.ContentType = "image/png"
+
+	if _, err := io.Copy(writer, bytes.NewReader(imageData)); err != nil {
+		return "", fmt.Errorf("failed to copy image data to bucket: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		return "", fmt.Errorf("failed to close writer: %v", err)
+	}
+
+	// Make the object publicly accessible
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		return "", fmt.Errorf("failed to set ACL: %v", err)
+	}
+
+	// Get the public URL
+	attrs, err := obj.Attrs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to get object attributes: %v", err)
+	}
+
+	return attrs.MediaLink, nil
+}
+
 
 func generateDallEPromptsForScript(client *openai.Client, script string, style ImageStyle) ([]SentencePrompt, error) {
 	// strip all emojis away from the script

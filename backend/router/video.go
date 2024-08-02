@@ -14,7 +14,7 @@ func SetupVideoRoutes() {
 	privVideo := VIDEO.Group("/private")
 	privVideo.Use(auth.SecureAuth()) // middleware to secure all routes for this group
 
-	privVideo.Get("/video/:id", GetVideo)
+	privVideo.Get("/:id", GetVideo)
 	privVideo.Post("/create", CreateSchedule)
 }
 

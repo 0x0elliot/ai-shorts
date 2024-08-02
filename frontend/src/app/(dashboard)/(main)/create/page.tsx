@@ -109,6 +109,18 @@ export default function Create() {
                 description: "Your video schedule has been created!",
             })
 
+            if (response.data.video.id === undefined) {
+                toast({
+                    title: "Error",
+                    description: "An error occurred while creating your video schedule.",
+                    variant: "destructive",
+                })
+                return
+            }
+            
+            // redirect to the edit page
+            window.location.href = `/create/${response.data.video.id}/edit`;
+
         }).catch((error) => {
             if (error.response.status === 401) {
                 window.location.href = '/logout';

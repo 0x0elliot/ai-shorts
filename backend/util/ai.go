@@ -1,22 +1,23 @@
 package util
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"log"
 	"os"
-	"strings"
 	"path"
-	"io"
-	"bytes"
-	"encoding/base64"
-	"io/ioutil"
+	"strings"
+	"net/http"
 
 	models "go-authentication-boilerplate/models"
 
-	openai "github.com/sashabaranov/go-openai"
 	storage "cloud.google.com/go/storage"
+	openai "github.com/sashabaranov/go-openai"
 )
 
 var OPENAI_API_KEY = os.Getenv("ACIDRAIN_OPENAI_KEY")
@@ -38,6 +39,26 @@ type GeneratedImage struct {
 type SentencePrompt struct {
 	Sentence string
 	Prompt   string
+}
+
+type SDXLRequest struct {
+    ModelName        string  `json:"modelName"`
+    Prompt           string  `json:"prompt"`
+    Prompt2          string  `json:"prompt2,omitempty"`
+    ImageHeight      int     `json:"imageHeight"`
+    ImageWidth       int     `json:"imageWidth"`
+    NegativePrompt   string  `json:"negativePrompt,omitempty"`
+    NegativePrompt2  string  `json:"negativePrompt2,omitempty"`
+    NumOutputImages  int     `json:"numOutputImages"`
+    GuidanceScale    float64 `json:"guidanceScale"`
+    NumInferenceSteps int    `json:"numInferenceSteps"`
+    Seed             *int    `json:"seed,omitempty"`
+    OutputImgType    string  `json:"outputImgType"`
+}
+type SDXLResponse struct {
+    Data []struct {
+        B64JSON string `json:"b64_json"`
+    } `json:"data"`
 }
 
 func SaveVideoError(video *models.Video, err error) error {
@@ -79,7 +100,7 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 		return nil, err
 	}
 
-	prompts, err := generateDallEPromptsForScript(client, video.Script, DefaultStyle)
+	prompts, err := generateDallEPromptsForScript(client, video.Script, video.VideoStyle, video.Topic, video.Description)
 	if err != nil {
 		log.Printf("[ERROR] Error generating DALL-E prompts: %v", err)
 		_ = SaveVideoError(video, err)
@@ -237,7 +258,7 @@ func generateImagesForScript(ctx context.Context, client *openai.Client, storage
 	folderPath := path.Join("videos", videoID)
 
 	for i, sp := range sentencePrompts {
-		imageData, err := generateImageForPrompt(client, sp.Prompt, style)
+		imageData, err := generateImageForPrompt(sp.Prompt, style, 1)
 		if err != nil {
 			return nil, fmt.Errorf("error generating image for prompt %d: %v", i+1, err)
 		}
@@ -259,32 +280,75 @@ func generateImagesForScript(ctx context.Context, client *openai.Client, storage
 	return generatedImages, nil
 }
 
-func generateImageForPrompt(client *openai.Client, prompt string, style ImageStyle) ([]byte, error) {
-	stylePrompt := getStylePrompt(style)
-	fullPrompt := fmt.Sprintf("%s %s", stylePrompt, prompt)
+func generateImageForPrompt(prompt string, style ImageStyle, numImages int) ([]byte, error) {
+    // stylePrompt := getStylePrompt(style)	
+	fullPrompt := prompt
 
-	req := openai.ImageRequest{
-		Prompt:         fullPrompt,
-		Size:           openai.CreateImageSize1024x1024,
-		ResponseFormat: openai.CreateImageResponseFormatB64JSON,
-		N:              1,
-	}
+    apiKey := os.Getenv("ACIDRAIN_OLA_KEY")
+    if apiKey == "" {
+        return nil, fmt.Errorf("ACIDRAIN_OLA_KEY environment variable not set")
+    }
 
-	resp, err := client.CreateImage(context.Background(), req)
+	log.Printf("Generating image for prompt: %s", fullPrompt)
+
+    reqBody := SDXLRequest{
+        ModelName:         "diffusion1XL",
+        Prompt:            fullPrompt,
+        ImageHeight:       1024,
+        ImageWidth:        1024,
+        NumOutputImages:   numImages,
+        GuidanceScale:     7.5,
+        NumInferenceSteps: 10,
+        OutputImgType:     "pil",
+    }
+
+    jsonData, err := json.Marshal(reqBody)
+    if err != nil {
+        return nil, fmt.Errorf("failed to marshal request body: %v", err)
+    }
+
+    req, err := http.NewRequest("POST", "https://cloud.olakrutrim.com/v1/images/generations/diffusion", bytes.NewBuffer(jsonData))
+    if err != nil {
+        return nil, fmt.Errorf("failed to create request: %v", err)
+    }
+
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+apiKey)
+
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("request failed: %v", err)
+    }
+    defer resp.Body.Close()
+
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read response body: %v", err)
+    }
+
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("API request failed with status code %d: %s", resp.StatusCode, string(body))
+    }
+
+    var sdxlResp SDXLResponse
+    err = json.Unmarshal(body, &sdxlResp)
+    if err != nil {
+        return nil, fmt.Errorf("failed to unmarshal response: %v", err)
+    }
+
+    if len(sdxlResp.Data) == 0 {
+        return nil, fmt.Errorf("no image data received")
+    }
+
+	// remember, output image type is "pil", so we need to decode the base64 string
+	b64JSON := sdxlResp.Data[0].B64JSON
+	imageData, err := base64.StdEncoding.DecodeString(b64JSON)
 	if err != nil {
-		return nil, fmt.Errorf("image creation failed: %v", err)
+		return nil, fmt.Errorf("failed to decode base64 image data: %v", err)
 	}
 
-	if len(resp.Data) == 0 {
-		return nil, fmt.Errorf("no image data received")
-	}
-
-	imgBytes, err := base64.StdEncoding.DecodeString(resp.Data[0].B64JSON)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode image data: %v", err)
-	}
-
-	return imgBytes, nil
+	return imageData, nil
 }
 
 func getStylePrompt(style ImageStyle) string {
@@ -326,120 +390,140 @@ func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, object
 	return attrs.MediaLink, nil
 }
 
+func generateDallEPromptsForScript(client *openai.Client, script string, style string, topic string, description string) ([]SentencePrompt, error) {
+	// strip all emojis away from the script
+	script = StripEmoji(script)
+	sentences := splitIntoSentences(script)
 
-func generateDallEPromptsForScript(client *openai.Client, script string, style ImageStyle) ([]SentencePrompt, error) {
-    // Strip all emojis away from the script
-    script = StripEmoji(script)
-    sentences := splitIntoSentences(script)
+	var results []SentencePrompt
+	for _, sentence := range sentences {
+		prompt, err := generateDallEPromptForSentence(client, sentence, style, topic, description)
+		if err != nil {
+			return nil, fmt.Errorf("error generating prompt for sentence '%s': %v", sentence, err)
+		}
+		results = append(results, SentencePrompt{Sentence: sentence, Prompt: prompt})
+	}
 
-    functionDescription := openai.FunctionDefinition{
-        Name:        "generate_dalle_prompts",
-        Description: "Generate DALL-E 3 prompts for multiple sentences",
-        Parameters: json.RawMessage(`{
-            "type": "object",
-            "properties": {
-                "prompts": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "sentence": {
-                                "type": "string",
-                                "description": "The original sentence from the script"
-                            },
-                            "prompt": {
-                                "type": "string",
-                                "description": "A detailed prompt for DALL-E 3 to generate an image based on the sentence and style"
-                            }
-                        },
-                        "required": ["sentence", "prompt"]
-                    }
-                }
-            },
-            "required": ["prompts"]
-        }`),
-    }
-
-    styleInstruction := getStyleInstruction(style)
-    
-    // Prepare the sentences as a formatted string
-    formattedSentences := ""
-    for i, sentence := range sentences {
-        formattedSentences += fmt.Sprintf("%d. %s\n", i+1, sentence)
-    }
-
-    resp, err := client.CreateChatCompletion(
-        context.Background(),
-        openai.ChatCompletionRequest{
-            Model: openai.GPT4,
-            Messages: []openai.ChatCompletionMessage{
-                {
-                    Role:    openai.ChatMessageRoleSystem,
-                    Content: "You are an AI assistant specialized in creating prompts for DALL-E 3 image generation based on sentences from a video script.",
-                },
-                {
-                    Role: openai.ChatMessageRoleUser,
-                    Content: fmt.Sprintf(`Generate detailed DALL-E 3 prompts for each of the following sentences from a video script. 
-                        Each prompt should describe a single, striking image that captures the essence of the corresponding sentence. 
-                        %s
-                        Focus on visual elements, colors, and composition. The prompts should be descriptive but concise.
-                        
-                        Sentences:
-                        %s`, styleInstruction, formattedSentences),
-                },
-            },
-            Functions: []openai.FunctionDefinition{
-                functionDescription,
-            },
-            FunctionCall: openai.FunctionCall{
-                Name: "generate_dalle_prompts",
-            },
-        },
-    )
-
-    if err != nil {
-        return nil, fmt.Errorf("error creating chat completion: %v", err)
-    }
-
-    if len(resp.Choices) == 0 {
-        return nil, fmt.Errorf("no choices returned from the API")
-    }
-
-    functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
-
-    var result struct {
-        Prompts []SentencePrompt `json:"prompts"`
-    }
-    err = json.Unmarshal([]byte(functionArgs), &result)
-    if err != nil {
-        return nil, fmt.Errorf("error parsing AI response: %v", err)
-    }
-
-    // Ensure the order of prompts matches the order of sentences
-    orderedPrompts := make([]SentencePrompt, len(sentences))
-    for _, prompt := range result.Prompts {
-        for i, sentence := range sentences {
-            if prompt.Sentence == sentence {
-                orderedPrompts[i] = prompt
-                break
-            }
-        }
-    }
-
-    return orderedPrompts, nil
+	return results, nil
 }
 
-func getStyleInstruction(style ImageStyle) string {
-	switch style {
-	case AnimeStyle:
-		return "Create the prompt in an anime art style."
-	case CartoonStyle:
-		return "Create the prompt in a cartoon art style."
-	case WatercolorStyle:
-		return "Create the prompt in a watercolor painting style."
-	default:
-		return "Create the prompt in a realistic, detailed style."
+func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, description string, topic string, style string) (string, error) {
+	// functionDescription := openai.FunctionDefinition{
+	//     Name:        "generate_dalle_prompt",
+	//     Description: "Generate a DALL-E 3 prompt based on the given sentence and style",
+	//     Parameters: json.RawMessage(`{
+	//         "type": "object",
+	//         "properties": {
+	//             "prompt": {
+	//                 "type": "string",
+	// 				"description": "A detailed, DALL-E friendly prompt that focuses on a single, clear subject. Include specific artistic style, lighting, and mood, but avoid complex scenes or text requests."
+	//         },
+	//         "required": ["prompt"]
+	//     }`),
+	// }
+
+	functionDescription := openai.FunctionDefinition{
+		Name:        "generate_dalle_prompt",
+		Description: "Generate a DALL-E 3 prompt based on the given sentence and style",
+		Parameters: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"prompt": {
+					"type": "string",
+					"description": "A detailed, DALL-E friendly prompt that focuses on a single, clear subject. Include specific artistic style, lighting, and mood, but avoid complex scenes or text requests."
+				}
+			},
+			"required": ["prompt"]
+		}`),
 	}
+
+	styleInstruction := getStyleInstruction(style)
+	resp, err := client.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model: openai.GPT4o,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: "You are an AI assistant specialized in creating prompts for DALL-E 3 image generation based on individual sentences from a video script.",
+				},
+				{
+					Role: openai.ChatMessageRoleUser,
+					Content: fmt.Sprintf(`Generate detailed DALL-E 3 prompts for each of the following sentences from a video script. 
+                    Follow these guidelines for each prompt:
+                    1. Focus on a single, clear subject or concept from the sentence.
+                    2. Don't request text! Try to not include any text in the prompt. Go after the visual aspect of the sentence.
+					3. When you get a single sentence, without much context, Always refer to the full script to understand the context and generate a prompt that fits the overall theme of the video.
+					4. Never come up with prompts that show details of a screen. Focus on other aspects of the sentence.
+					5. Avoid prompts that ask for specific text or logos, banners etc. Focus on the visual aspect of the prompt.
+					6. The images you generate should feel like they belong in a high-quality video. They should be visually appealing and solid.
+					7. FOCUS on the ARTISTIC STYLE: %s
+
+					The topic of the video is: %s
+					The description of the video is: %s
+
+					The sentence to generate a prompt for is:
+                    %s
+					`, styleInstruction, topic, description, formattedSentence),
+				},
+			},
+			Functions: []openai.FunctionDefinition{
+				functionDescription,
+			},
+			FunctionCall: openai.FunctionCall{
+				Name: "generate_dalle_prompt",
+			},
+		},
+	)
+
+	if err != nil {
+		return "", fmt.Errorf("error creating chat completion: %v", err)
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("no choices returned from the API")
+	}
+
+	functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
+	var result struct {
+		Prompt string `json:"prompt"`
+	}
+
+	err = json.Unmarshal([]byte(functionArgs), &result)
+	if err != nil {
+		return "", fmt.Errorf("error parsing AI response: %v", err)
+	}
+	return result.Prompt, nil
+}
+
+func getStyleInstruction(style string) string {
+	// switch style {
+	// case AnimeStyle:
+	// 	return "Create the prompt in an anime art style."
+	// case CartoonStyle:
+	// 	return "Create the prompt in a cartoon art style."
+	// case WatercolorStyle:
+	// 	return "Create the prompt in a watercolor painting style."
+	// default:
+	// 	return "Create the prompt in a realistic, detailed style."
+	// }
+    switch style {
+    case "anime":
+        return "Create the prompt in the style of a high-quality anime key visual, with vibrant colors, dynamic lighting, and attention to fine details. Think of works by Studio Ghibli or Makoto Shinkai."
+    case "cartoon":
+        return "Design the prompt in the style of a modern, polished cartoon, reminiscent of high-end 3D animated films. Include bold colors, exaggerated features, and a touch of whimsy, similar to works by Pixar or DreamWorks."
+    case "watercolor":
+        return "Envision the prompt as a delicate watercolor painting, with soft, translucent colors blending seamlessly. Incorporate visible brush strokes and paper texture, inspired by the ethereal works of J.M.W. Turner or the nature studies of Albrecht Dürer."
+    case "digital":
+        return "Craft the prompt as a cutting-edge digital artwork, with crisp lines, vibrant gradients, and a futuristic feel. Think of works by Beeple or the sleek aesthetics of sci-fi concept art."
+    case "vintage":
+        return "Frame the prompt as a vintage illustration from the mid-20th century, with slightly faded colors, visible halftone dots, and the charm of retro advertising posters or classic book covers."
+    case "minimalist":
+        return "Conceptualize the prompt as a minimalist design, focusing on clean lines, negative space, and a limited color palette. Draw inspiration from modern graphic design and abstract art movements."
+    case "photorealistic":
+        return "Envision the prompt as a hyper-realistic photograph, with incredible detail, dramatic lighting, and perfect composition. Think of high-end editorial photography or the works of photorealistic painters like Chuck Close."
+    default:
+        return "Create the prompt as a vivid, high-definition digital painting, balancing realism with artistic flair. Include rich textures, dramatic lighting, and a cinematic quality to the composition."
+    }
 }
 
 func splitIntoSentences(text string) []string {
@@ -447,11 +531,11 @@ func splitIntoSentences(text string) []string {
 	sentences := strings.FieldsFunc(text, func(r rune) bool {
 		return r == '.' || r == '!' || r == '?'
 	})
-	
+
 	for i, s := range sentences {
 		sentences[i] = strings.TrimSpace(s)
 	}
-	
+
 	return sentences
 }
 

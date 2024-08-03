@@ -20,6 +20,7 @@ type Video struct {
 	DALLEPromptGenerated bool `json:"dallePromptGenerated" gorm:"default:false"`
 	DALLEGenerated  bool `json:"dalleGenerated" gorm:"default:false"`
 	TTSGenerated    bool `json:"ttsGenerated" gorm:"default:false"`
+	SVTGenerated    bool `json:"svtGenerated" gorm:"default:false"`
 	VideoStitched   bool `json:"videoStitched" gorm:"default:false"`
 
 	Progress 	  int  `json:"progress" gorm:"default:0"`
@@ -32,6 +33,7 @@ type Video struct {
 	Error 		  string `json:"error" gorm:"null"`
 
 	TTSURL           string `json:"ttsURL" gorm:"null"`
+	SVTURL           string `json:"svtURL" gorm:"null"`
 	StitchedVideoURL string `json:"stitchedVideoURL" gorm:"null"`
 
 	OwnerID string `json:"ownerID"`

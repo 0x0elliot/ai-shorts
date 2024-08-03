@@ -13,7 +13,6 @@ import (
 // CreateServer creates a new Fiber instance
 func CreateServer() *fiber.App {
 	app := fiber.New()
-
 	return app
 }
 

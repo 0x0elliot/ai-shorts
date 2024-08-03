@@ -69,13 +69,11 @@ export default function EditCreate() {
                 spread: 70,
                 origin: { y: 0.6 }
             })
-        }
-        else if (video.videoGenerated) { setProgress(90); setStatus('Putting the finishing touches...') }
-        else if (video.videoStitched) { setProgress(80); setStatus('Stitching frames like a video tailor!') }
-        else if (video.ttsGenerated) { setProgress(60); setStatus('Teaching robots to talk like humans...') }
-        else if (video.dallePromptGenerated) { setProgress(40); setStatus('Summoning the AI art genies...') }
-        else if (video.scriptGenerated) { setProgress(20); setStatus('Crafting a blockbuster script...') }
-        else if (video.script) { setProgress(15); setStatus('Decoding your brilliant ideas...') }
+        } else if (video.dalleGenerated) { setProgress(60); setStatus('Summoning the AI art genies...') }
+        else if (video.svtGenerated) { setProgress(40); setStatus('Crafting subtitles for your masterpiece...') }
+        else if (video.ttsGenerated) { setProgress(30); setStatus('Teaching robots to talk like humans...') }
+        else if (video.dallePromptGenerated) { setProgress(45); setStatus('Preparing to summon the AI art genies...') }
+        else if (video.scriptGenerated) { setProgress(10); setStatus('Crafting a blockbuster script...') }
         else { setProgress(0); setStatus('Warming up our creative engines...') }
     }
 

@@ -22,6 +22,33 @@ func InitializeGCP(projectID, bucketName, creds string) (*storage.Client, error)
 	return client, nil
 }
 
+
+func SaveSVTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, svtContent string) (string, error) {
+	obj := bucket.Object(objectPath)
+	writer := obj.NewWriter(ctx)
+	_, err := writer.Write([]byte(svtContent))
+	if err != nil {
+		return "", fmt.Errorf("error writing SVT to bucket: %v", err)
+	}
+	err = writer.Close()
+	if err != nil {
+		return "", fmt.Errorf("error closing writer: %v", err)
+	}
+
+	// Make the object publicly accessible
+	if err := obj.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		return "", fmt.Errorf("error setting ACL: %v", err)
+	}
+
+	// Get the public URL
+	attrs, err := obj.Attrs(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error getting object attributes: %v", err)
+	}
+
+	return attrs.MediaLink, nil
+}
+
 func DeleteFolderFromBucket(ctx context.Context, client *storage.Client, bucketName, folderName string) error {
 	bucket := client.Bucket(bucketName)
 
@@ -32,7 +59,8 @@ func DeleteFolderFromBucket(ctx context.Context, client *storage.Client, bucketN
 	return nil
 }
 
-func GetGCPClient(creds string) (*storage.Client, error) {
+func GetGCPClient() (*storage.Client, error) {
+	creds := "/Users/aditya/Documents/OSS/zappush/shortpro/backend/gcp_credentials.json"
 	ctx := context.Background()
 	client, err := storage.NewClient(ctx, option.WithCredentialsFile(creds))
 	if err != nil {

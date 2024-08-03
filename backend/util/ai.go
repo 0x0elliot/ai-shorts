@@ -18,6 +18,9 @@ import (
 
 	storage "cloud.google.com/go/storage"
 	openai "github.com/sashabaranov/go-openai"
+	genai "github.com/google/generative-ai-go/genai"
+    "google.golang.org/api/option"
+
 )
 
 var OPENAI_API_KEY = os.Getenv("ACIDRAIN_OPENAI_KEY")
@@ -71,7 +74,7 @@ func SaveVideoError(video *models.Video, err error) error {
 	return nil
 }
 
-func CreateVideo(video *models.Video) (*models.Video, error) {
+func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	client := openai.NewClient(OPENAI_API_KEY)
 	storageClient, err := GetGCPClient("/Users/aditya/Documents/OSS/zappush/shortpro/backend/gcp_credentials.json")
 	if err != nil {
@@ -79,9 +82,39 @@ func CreateVideo(video *models.Video) (*models.Video, error) {
 		return nil, err
 	}
 
+	if recreate {
+		// clean up everything from the bucket
+		bucketName := os.Getenv("ACIDRAIN_GCP_BUCKET_NAME")
+		videoID := video.ID
+		folderPath := path.Join("videos", videoID)
+
+		if err := DeleteFolderFromBucket(context.Background(), storageClient, bucketName, folderPath); err != nil {
+			log.Printf("[ERROR] Error deleting folder from bucket: %v", err)
+		}
+
+		video.Progress = 0
+		video.ScriptGenerated = false
+		video.DALLEPromptGenerated = false
+		video.DALLEGenerated = false
+		video.TTSGenerated = false
+		video.VideoStitched = false
+		video.VideoGenerated = false
+		video.VideoUploaded = false
+		video.Error = ""
+		video.TTSURL = ""
+		video.StitchedVideoURL = ""
+
+		video, err = SetVideo(video)
+		if err != nil {
+			log.Printf("[ERROR] Error saving video: %v", err)
+			return nil, err
+		}
+	}
+
 	cleanedtopic, script, err := processContent(client, video.Topic, video.Description)
 	if err != nil {
 		log.Printf("[ERROR] Error processing content: %v", err)
+		err = SaveVideoError(video, err)
 		return nil, err
 	}
 
@@ -351,19 +384,6 @@ func generateImageForPrompt(prompt string, style ImageStyle, numImages int) ([]b
 	return imageData, nil
 }
 
-func getStylePrompt(style ImageStyle) string {
-	switch style {
-	case AnimeStyle:
-		return "Create an anime style image of"
-	case CartoonStyle:
-		return "Create a cartoon style image of"
-	case WatercolorStyle:
-		return "Create a watercolor style painting of"
-	default:
-		return "Create a realistic, detailed image of"
-	}
-}
-
 func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, imageData []byte) (string, error) {
 	obj := bucket.Object(objectPath)
 	writer := obj.NewWriter(ctx)
@@ -407,7 +427,73 @@ func generateDallEPromptsForScript(client *openai.Client, script string, style s
 	return results, nil
 }
 
+func generateDallEPromptForSentenceGemini(formattedSentence, description, topic, style string) (string, error) {
+    ctx := context.Background()
+    client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("ACIDRAIN_GEMNI_KEY")))
+    if err != nil {
+        return "", fmt.Errorf("error creating Gemini client: %v", err)
+    }
+    defer client.Close()
+
+    model := client.GenerativeModel("gemini-pro")
+
+    styleInstruction := getStyleInstruction(style)
+
+    prompt := fmt.Sprintf(`Generate a detailed DALL-E 3 prompt based on the following information:
+
+Sentence: %s
+Topic: %s
+Description: %s
+Style Instruction: %s
+
+Guidelines for the prompt:
+1. Focus on a single, clear subject or concept from the sentence.
+2. Don't request text! Try to not include any text in the prompt. Go after the visual aspect of the sentence.
+3. Always refer to the full context (topic and description) to generate a prompt that fits the overall theme.
+4. Never come up with prompts that show details of a screen. Focus on other aspects of the sentence.
+5. Avoid prompts that ask for specific text or logos, banners etc. Focus on the visual aspect of the prompt.
+6. The images you generate should feel like they belong in a high-quality video. They should be visually appealing and solid.
+7. FOCUS on the ARTISTIC STYLE provided in the style instruction.
+
+Please format your response in a simple way, without any additional information or formatting.
+`, formattedSentence, topic, description, styleInstruction)
+
+    resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+    if err != nil {
+        return "", fmt.Errorf("error generating content: %v", err)
+    }
+
+    if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+        return "", fmt.Errorf("no content generated")
+    }
+
+    jsonResponse := resp.Candidates[0].Content.Parts[0].(genai.Text)
+
+	log.Printf("jsonResponse: %s", jsonResponse)
+
+    // var result struct {
+    //     Prompt string `json:"prompt"`
+    // }
+
+	// strip any new line characters.
+	jsonResponseStr := string(jsonResponse)
+	// jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```json", "")
+	// jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```", "")
+	// jsonResponseFinal := strings.ReplaceAll(jsonResponseStr, "\n", "")
+
+    // err = json.Unmarshal([]byte(jsonResponseFinal), &result)
+    // if err != nil {
+    //     return "", fmt.Errorf("error parsing Gemini response: %v", err)
+    // }
+
+    return jsonResponseStr, nil
+}
+
 func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, description string, topic string, style string) (string, error) {
+	if isDevMode() {
+		return generateDallEPromptForSentenceGemini(formattedSentence, description, topic, style)
+	}
+
 	// functionDescription := openai.FunctionDefinition{
 	//     Name:        "generate_dalle_prompt",
 	//     Description: "Generate a DALL-E 3 prompt based on the given sentence and style",
@@ -539,7 +625,67 @@ func splitIntoSentences(text string) []string {
 	return sentences
 }
 
+func processContentGemini(topic, description string) (string, string, error) {
+    ctx := context.Background()
+    client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("ACIDRAIN_GEMNI_KEY")))
+    if err != nil {
+        return "", "", fmt.Errorf("error creating Gemini client: %v", err)
+    }
+    defer client.Close()
+
+    model := client.GenerativeModel("gemini-pro")
+
+    prompt := fmt.Sprintf(`Process the following content to create a cleaned topic and script for short-form video:
+
+Original topic: %s
+Description: %s
+
+You are a script writer for social media to help with TikTok, Instagram, YouTube Shorts, and other short-form video content. Create a cleaned topic and script based on the given topic and description. The script should be engaging and informative, suitable for a 60-80 second video.
+
+Please format your response as a JSON object with the following structure:
+{
+    "cleaned_topic": "A more attractive and engaging version of the original topic",
+    "script": "A 60-80 second script for the video (more than 200 words)"
+}
+
+Do not include hashtags, links, emojis, or any guidance on how to shoot the video or camera angles in the script.`, topic, description)
+
+    resp, err := model.GenerateContent(ctx, genai.Text(prompt))
+    if err != nil {
+        return "", "", fmt.Errorf("error generating content: %v", err)
+    }
+
+    if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
+        return "", "", fmt.Errorf("no content generated")
+    }
+
+    jsonResponse := resp.Candidates[0].Content.Parts[0].(genai.Text)
+
+	jsonResponseStr := string(jsonResponse)
+	jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```json", "")
+	jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```", "")
+	jsonResponseFinal := strings.ReplaceAll(jsonResponseStr, "\n", "")
+
+	log.Printf("jsonResponse: %s", jsonResponse)
+
+    var result struct {
+        CleanedTopic string `json:"cleaned_topic"`
+        Script       string `json:"script"`
+    }
+
+    err = json.Unmarshal([]byte(jsonResponseFinal), &result)
+    if err != nil {
+        return "", "", fmt.Errorf("error parsing Gemini response: %v", err)
+    }
+
+    return result.CleanedTopic, result.Script, nil
+}
+
 func processContent(client *openai.Client, topic, description string) (string, string, error) {
+    if isDevMode() {
+        return processContentGemini(topic, description)
+    }
+
 	functionDescription := openai.FunctionDefinition{
 		Name:        "process_content",
 		Description: "Process a topic and description to create a cleaned topic and script for short-form video content",

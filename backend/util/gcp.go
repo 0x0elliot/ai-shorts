@@ -22,6 +22,16 @@ func InitializeGCP(projectID, bucketName, creds string) (*storage.Client, error)
 	return client, nil
 }
 
+func DeleteFolderFromBucket(ctx context.Context, client *storage.Client, bucketName, folderName string) error {
+	bucket := client.Bucket(bucketName)
+
+	if err := bucket.Object(folderName).Delete(ctx); err != nil {
+		log.Printf("failed to delete folder: %v", err)
+		return err
+	}
+	return nil
+}
+
 func GetGCPClient(creds string) (*storage.Client, error) {
 	ctx := context.Background()
 	client, err := storage.NewClient(ctx, option.WithCredentialsFile(creds))

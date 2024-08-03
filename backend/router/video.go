@@ -16,6 +16,7 @@ func SetupVideoRoutes() {
 
 	privVideo.Get("/:id", GetVideo)
 	privVideo.Post("/create", CreateSchedule)
+	privVideo.Post("/recreate/:id", RecreateVideo)
 }
 
 func GetVideo(c *fiber.Ctx) error {
@@ -39,6 +40,41 @@ func GetVideo(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,
 		"video": video,
+	})
+}
+
+
+func RecreateVideo(c *fiber.Ctx) error {
+	// if video exists but had an error, we start the background job again
+	id := c.Params("id")
+	video, err := util.GetVideoById(id)
+	if err != nil {
+		log.Printf("[ERROR] Error getting video: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": true,
+			"message": "Error getting video",
+		})
+	}
+
+	if video.OwnerID != c.Locals("id") {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": true,
+			"message": "Unauthorized",
+		})
+	}
+
+	if !(len(video.Error) > 0) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": true,
+			"message": "Video is not in error state",
+		})
+	}
+
+	go util.CreateVideo(video, true)
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"error": false,
+		"message": "Recreating video",
 	})
 }
 
@@ -111,7 +147,7 @@ func CreateSchedule(c *fiber.Ctx) error {
 	}
 
 	// start background job to create video
-	go util.CreateVideo(video)
+	go util.CreateVideo(video, false)
 
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,

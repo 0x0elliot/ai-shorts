@@ -3,7 +3,12 @@ package util
 import (
 	"encoding/base64"
 	"strings"
+	"os"
 )
+
+func isDevMode() bool {
+    return os.Getenv("USE_GEMINI") == "true"
+}
 
 func StripEmoji(s string) string {
 	// https://stackoverflow.com/a/13785978/13201408

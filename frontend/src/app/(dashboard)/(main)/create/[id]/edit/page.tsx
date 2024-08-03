@@ -7,6 +7,7 @@ import { parseCookies } from 'nookies'
 import { siteConfig } from '@/app/siteConfig'
 import { motion } from 'framer-motion'
 import confetti from 'canvas-confetti'
+import { Button } from '@/components/ui/button'
 
 export default function EditCreate() {
     const { toast } = useToast()
@@ -15,7 +16,43 @@ export default function EditCreate() {
     const [progress, setProgress] = useState(0)
     const [error, setError] = useState(null)
     const [status, setStatus] = useState('Brewing your video magic...')
+    const [accessToken, setAccessToken] = useState("")
     const intervalRef = useRef(null)
+
+    const handleRetry = () => {
+        fetch(`${siteConfig.baseApiUrl}/api/video/private/recreate/${id}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('Failed to recreate video')
+            return res.json()
+        })
+        .then(data => {
+            setError(null)
+            setProgress(0)
+            setStatus('Restarting the magic! Hang tight...')
+            toast({
+                title: "Success",
+                description: "Video recreation started. The show must go on!",
+            })
+
+            // reload page after 2 seconds
+            setTimeout(() => {
+                window.location.reload()
+            }, 2000)
+        })
+        .catch(err => {
+            console.error('Error recreating video:', err)
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'Failed to restart the video creation. Our wand needs new batteries!'
+            })
+        })
+    }
 
     const determineProgress = (video) => {
         if (video.error) {
@@ -45,6 +82,7 @@ export default function EditCreate() {
     useEffect(() => {
         const cookies = parseCookies()
         const access_token = cookies.access_token
+        setAccessToken(access_token)
         const fetchProgress = () => {
             fetch(`${siteConfig.baseApiUrl}/api/video/private/${id}`, {
                 headers: {
@@ -100,6 +138,12 @@ export default function EditCreate() {
                             <p className="text-red-500 text-lg mb-4">Whoops! We hit a snag in our magic trick:</p>
                             <p className="text-red-400">{error}</p>
                             <p className="mt-4 text-gray-600">Don't worry, our team of wizard debuggers is on it!</p>
+                            <Button 
+                                onClick={handleRetry}
+                                className="mt-6 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
+                            >
+                                🔄 Wave the Magic Wand Again
+                            </Button>
                         </motion.div>
                     ) : (
                         <motion.div

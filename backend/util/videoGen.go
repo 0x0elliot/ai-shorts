@@ -12,6 +12,11 @@ import (
 	"strconv"
 	"bufio"
 
+	"github.com/golang/freetype"
+    "github.com/golang/freetype/truetype"
+    "golang.org/x/image/math/fixed"
+	"math"
+
 	// "github.com/fogleman/gg"
 	// "golang.org/x/image/font"
 	// "golang.org/x/image/font/opentype"
@@ -20,7 +25,6 @@ import (
 
 	// "github.com/asticode/go-astikit"
 	"image"
-    "image/color"
 	"gocv.io/x/gocv"
 	"os/exec"
 )
@@ -236,65 +240,193 @@ func createSlideshowWithSubtitles(images []string, srtFile, audioFile, outputFil
         return fmt.Errorf("failed to parse SRT file: %w", err)
     }
 
+	log.Printf("[DEBUG] Number of subtitles: %d", len(subtitles))
+
     if len(images) != len(subtitles) {
         return fmt.Errorf("number of images (%d) doesn't match number of subtitles (%d)", len(images), len(subtitles))
     }
 
-	log.Println("Generating an audioless file first..")
+    log.Println("Generating an audioless file first...")
 
     // Create VideoWriter
-    writer, err := gocv.VideoWriterFile(outputFile, "mp4v", 25.0, 1080, 1920, true)
+	writer, err := gocv.VideoWriterFile(outputFile, "mp4v", 30.0, 1920, 1080, true)
     if err != nil {
         return fmt.Errorf("error creating VideoWriter: %v", err)
     }
     defer writer.Close()
 
-    for i, sub := range subtitles {
-        img := gocv.IMRead(images[i], gocv.IMReadColor)
-        if img.Empty() {
-            return fmt.Errorf("error reading image: %s", images[i])
-        }
-        defer img.Close()
+    // Load Roboto font
+    fontPath := "/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf"
 
-        resized := gocv.NewMat()
-        gocv.Resize(img, &resized, image.Point{X: 1080, Y: 1920}, 0, 0, gocv.InterpolationLinear)
-        defer resized.Close()
+	fontData, err := os.ReadFile(fontPath)
+	if err != nil {
+		return fmt.Errorf("error reading font file: %v", err)
+	}
 
-        // gocv.PutText(&resized, sub.Text, image.Pt(50, 1800), gocv.FontHersheyComplex, 1.0, color.RGBA{255, 255, 255, 0}, 2)
-		// Improved subtitle placement and formatting
-		lines := splitIntoLines(sub.Text, 30) // Split into lines of roughly 30 characters each
-		for j, line := range lines {
-			y := 1700 + (j * 60) // Start at 1700 and move down 60 pixels for each line
-			x := (1080 - len(line)*20) / 2 // Roughly center the text
-			gocv.PutText(&resized, line, image.Pt(x, y), gocv.FontHersheyComplex, 1.5, color.RGBA{255, 255, 255, 255}, 2)
-		}
-
-        frameDuration := int(sub.Duration.Seconds() * 25) // Assuming 25 fps
-        for j := 0; j < frameDuration; j++ {
-            if err := writer.Write(resized); err != nil {
-                return fmt.Errorf("error writing video frame: %v", err)
-            }
-        }
+    font, err := freetype.ParseFont(fontData)
+    if err != nil {
+        return fmt.Errorf("error loading font: %v", err)
     }
 
-	writer.Close()
+	for i, sub := range subtitles {
+		img := gocv.IMRead(images[i], gocv.IMReadColor)
+		if img.Empty() {
+			return fmt.Errorf("error reading image: %s", images[i])
+		}
+		defer img.Close()
+	
+		resized := gocv.NewMat()
+		gocv.Resize(img, &resized, image.Point{X: 1920, Y: 1080}, 0, 0, gocv.InterpolationCubic)
+		defer resized.Close()
+	
+		frameDuration := int(sub.Duration.Seconds() * 30)
+	
+		for j := 0; j < frameDuration; j++ {
+			frame := resized.Clone()
+	
+			zoomFactor := math.Min(1.0 + float64(j)/float64(frameDuration)*0.1, 1.1)
+			// panX := int(float64(j) / float64(frameDuration) * 100)
+			// panY := int(float64(j) / float64(frameDuration) * 50)
+			panX := int(math.Min(float64(j) / float64(frameDuration) * 100, 100))
+			panY := int(math.Min(float64(j) / float64(frameDuration) * 50, 50))
+			
+			m := gocv.GetRotationMatrix2D(image.Point{X: 960 + panX, Y: 540 + panY}, 0, zoomFactor)
+			// gocv.WarpAffine(frame, &frame, m, image.Point{X: 1920, Y: 1080})
+			gocv.WarpAffine(frame, &frame, m, image.Point{X: frame.Cols(), Y: frame.Rows()})
+	
+			if err := addSubtitleWithStyle(&frame, sub.Text, font); err != nil {
+				frame.Close()
+				return fmt.Errorf("error adding subtitle: %v", err)
+			}
+	
+			if j < 15 || j > frameDuration-15 {
+				alpha := float64(j) / 15
+				if j > frameDuration-15 {
+					alpha = float64(frameDuration-j) / 15
+				}
+				// blankMat := gocv.NewMatWithSize(1080, 1920, frame.Type())
+				blankMat := gocv.NewMatWithSize(frame.Rows(), frame.Cols(), frame.Type())
+				gocv.AddWeighted(frame, alpha, blankMat, 1-alpha, 0, &frame)
+				blankMat.Close()
+			}
+	
+			if err := writer.Write(frame); err != nil {
+				frame.Close()
+				return fmt.Errorf("error writing video frame: %v", err)
+			}
+			frame.Close()
 
-	newOutputFile := outputFile + "_final.mp4"
+			log.Printf("Processing frame %d/%d for image %d/%d\n", j+1, frameDuration, i+1, len(images))
+		}
+	}
 
+    writer.Close()
+
+	log.Println("[INFO] Audioless video generated successfully")
+
+    newOutputFile := outputFile + "_final.mp4"
     // Use FFmpeg to add audio to the video
     cmd := exec.Command("ffmpeg",
         "-i", outputFile,
         "-i", audioFile,
-        "-c:v", "copy",
+        "-c:v", "libx264",
+        "-preset", "slow",
+        "-crf", "18",
         "-c:a", "aac",
+        "-b:a", "192k",
         "-shortest",
         newOutputFile,
-	)
-
+    )
     output, err := cmd.CombinedOutput()
     if err != nil {
         return fmt.Errorf("error adding audio to video: %w\nFFmpeg output: %s", err, string(output))
     }
 
-    return err
+    return nil
 }
+
+func addSubtitleWithStyle(img *gocv.Mat, text string, font *truetype.Font) error {
+    width := img.Cols()
+    height := img.Rows()
+
+    // Create an image to draw the text
+    rgba := image.NewRGBA(image.Rect(0, 0, width, height))
+
+    c := freetype.NewContext()
+    c.SetDPI(72)
+    c.SetFont(font)
+    c.SetClip(rgba.Bounds())
+    c.SetDst(rgba)
+    c.SetSrc(image.White)
+
+    // Split text into lines
+    lines := splitIntoLines(text, 20)
+
+    // Calculate text size and position
+    fontSize := float64(height) / 15
+    c.SetFontSize(fontSize)
+    lineHeight := int(c.PointToFixed(fontSize) >> 6)
+    totalTextHeight := lineHeight * len(lines)
+
+    startY := (height - totalTextHeight) / 2
+
+    for i, line := range lines {
+        // Center each line
+        // textWidth, _ := c.MeasureString(line)
+		textWidth := fixed.I(int(fontSize) * len(line))
+        x := (width - int(textWidth>>6)) / 2
+        y := startY + (i+1)*lineHeight
+
+        // Draw text outline
+        for dy := -2; dy <= 2; dy++ {
+            for dx := -2; dx <= 2; dx++ {
+                if dx*dx+dy*dy >= 6 {
+                    continue
+                }
+                c.SetSrc(image.Black)
+                _, err := c.DrawString(line, freetype.Pt(x+dx, y+dy))
+                if err != nil {
+                    return fmt.Errorf("error drawing text outline: %v", err)
+                }
+            }
+        }
+
+        // Draw text
+        c.SetSrc(image.White)
+        _, err := c.DrawString(line, freetype.Pt(x, y))
+        if err != nil {
+            return fmt.Errorf("error drawing text: %v", err)
+        }
+    }
+
+    // Convert RGBA to Mat
+    mat, err := gocv.NewMatFromBytes(height, width, gocv.MatTypeCV8UC4, rgba.Pix)
+    if err != nil {
+        return fmt.Errorf("error creating Mat from RGBA: %v", err)
+    }
+    defer mat.Close()
+    mat.CopyTo(img)
+
+    return nil
+}
+
+// func splitIntoLines(text string, maxChars int) []string {
+//     var lines []string
+//     words := strings.Fields(text)
+//     currentLine := ""
+
+//     for _, word := range words {
+//         if len(currentLine)+len(word) > maxChars {
+//             lines = append(lines, strings.TrimSpace(currentLine))
+//             currentLine = word + " "
+//         } else {
+//             currentLine += word + " "
+//         }
+//     }
+
+//     if currentLine != "" {
+//         lines = append(lines, strings.TrimSpace(currentLine))
+//     }
+
+//     return lines
+// }

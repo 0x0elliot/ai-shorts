@@ -8,11 +8,11 @@ replace go-authentication-boilerplate => ./
 
 require (
 	cloud.google.com/go/storage v1.43.0
-	github.com/3d0c/gmf v0.0.0-20220906170454-be727bc5b56c
 	github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef
 	github.com/bold-commerce/go-shopify/v4 v4.5.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/gofiber/fiber/v2 v2.1.1
+	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/google/generative-ai-go v0.17.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.3.0
@@ -66,6 +66,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.26.0 // indirect
 	go.opentelemetry.io/otel/trace v1.26.0 // indirect
 	golang.org/x/crypto v0.25.0 // indirect
+	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect

@@ -70,7 +70,7 @@ export default function EditCreate() {
                 origin: { y: 0.6 }
             })
         } else if (video.dalleGenerated) { setProgress(60); setStatus('Summoning the AI art genies...') }
-        else if (video.svtGenerated) { setProgress(40); setStatus('Crafting subtitles for your masterpiece...') }
+        else if (video.srtGenerated) { setProgress(40); setStatus('Crafting subtitles for your masterpiece...') }
         else if (video.ttsGenerated) { setProgress(30); setStatus('Teaching robots to talk like humans...') }
         else if (video.dallePromptGenerated) { setProgress(45); setStatus('Preparing to summon the AI art genies...') }
         else if (video.scriptGenerated) { setProgress(10); setStatus('Crafting a blockbuster script...') }

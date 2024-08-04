@@ -170,20 +170,20 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		return nil, err
 	}
 
-	log.Printf("[INFO] Generating SVT for video: %s", video.ID)
+	log.Printf("[INFO] Generating SRT for video: %s", video.ID)
 
-	svtContent, err := generateSVTForTTSTranscript(ctx, storageClient, bucketName, video.ID)
+	srtContent, err := generateSRTForTTSTranscript(ctx, storageClient, bucketName, video.ID)
 	if err != nil {
-		log.Printf("[ERROR] Error generating SVT: %v", err)
+		log.Printf("[ERROR] Error generating SRT: %v", err)
 		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
-	log.Printf("[INFO] Generated SVT for video: %s", video.ID)
+	log.Printf("[INFO] Generated SRT for video: %s", video.ID)
 
 	video.Progress = 40
-	video.SVTGenerated = true
-	video.SVTURL = fmt.Sprintf("https://storage.googleapis.com/%s/videos/%s/subtitles/subtitles.srt", bucketName, video.ID)
+	video.SRTGenerated = true
+	video.SRTURL = fmt.Sprintf("https://storage.googleapis.com/%s/videos/%s/subtitles/subtitles.srt", bucketName, video.ID)
 
 	video, err = SetVideo(video)
 	if err != nil {
@@ -194,7 +194,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Generating DALL-E prompts for video: %s", video.ID)
 
-	prompts, err := generateDallEPromptsForScript(client, svtContent, video)
+	prompts, err := generateDallEPromptsForScript(client, srtContent, video)
 	if err != nil {
 		log.Printf("[ERROR] Error generating DALL-E prompts: %v", err)
 		_ = SaveVideoError(video, err)
@@ -240,7 +240,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	return video, nil
 }
 
-func generateSVTForTTSTranscript(ctx context.Context, client *storage.Client, bucketName, videoID string) (string, error) {
+func generateSRTForTTSTranscript(ctx context.Context, client *storage.Client, bucketName, videoID string) (string, error) {
 	// Construct the path to the existing audio file
 	audioObjectPath := fmt.Sprintf("videos/%s/audio/full_audio.mp3", videoID)
 
@@ -253,23 +253,23 @@ func generateSVTForTTSTranscript(ctx context.Context, client *storage.Client, bu
 	// https://storage.googleapis.com/zappush_public/videos/3291a801-3b3b-4018-b706-670fcce05563/image_1.png
 	audioURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, audioObjectPath)
 
-	// Use Whisper to generate SVT content
-	svtContent, err := generateSVTWithWhisper(audioURL)
+	// Use Whisper to generate SRT content
+	srtContent, err := generateSRTWithWhisper(audioURL)
 	if err != nil {
-		return "", fmt.Errorf("error generating SVT with Whisper: %v", err)
+		return "", fmt.Errorf("error generating SRT with Whisper: %v", err)
 	}
 
-	// Save the SVT file to the bucket
-	svtObjectPath := fmt.Sprintf("videos/%s/subtitles/subtitles.srt", videoID)
-	_, err = saveSVTToBucket(ctx, bucket, svtObjectPath, svtContent)
+	// Save the SRT file to the bucket
+	srtObjectPath := fmt.Sprintf("videos/%s/subtitles/subtitles.srt", videoID)
+	_, err = saveSRTToBucket(ctx, bucket, srtObjectPath, srtContent)
 	if err != nil {
-		return "", fmt.Errorf("error saving SVT to bucket: %v", err)
+		return "", fmt.Errorf("error saving SRT to bucket: %v", err)
 	}
 
-	return svtContent, nil
+	return srtContent, nil
 }
 
-func generateSVTWithWhisper(audioURL string) (string, error) {
+func generateSRTWithWhisper(audioURL string) (string, error) {
 	openaiClient := openai.NewClient(OPENAI_API_KEY)
 
 	// Download the audio file from the bucket
@@ -309,12 +309,12 @@ func generateSVTWithWhisper(audioURL string) (string, error) {
 	return respOA.Text, nil
 }
 
-func saveSVTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, svtContent string) (string, error) {
+func saveSRTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, srtContent string) (string, error) {
 	obj := bucket.Object(objectPath)
 	writer := obj.NewWriter(ctx)
-	_, err := writer.Write([]byte(svtContent))
+	_, err := writer.Write([]byte(srtContent))
 	if err != nil {
-		return "", fmt.Errorf("error writing SVT to bucket: %v", err)
+		return "", fmt.Errorf("error writing SRT to bucket: %v", err)
 	}
 	err = writer.Close()
 	if err != nil {
@@ -543,14 +543,14 @@ func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, object
 	return attrs.MediaLink, nil
 }
 
-func generateDallEPromptsForScript(client *openai.Client, svtContent string, video *models.Video) ([]SentencePrompt, error) {
+func generateDallEPromptsForScript(client *openai.Client, srtContent string, video *models.Video) ([]SentencePrompt, error) {
 	var script string
 
-	if len(svtContent) == 0 {
+	if len(srtContent) == 0 {
 		script = video.Script
 	} else {
 		// get the script content
-		resp, err := http.Get(video.SVTURL)
+		resp, err := http.Get(video.SRTURL)
 		if err != nil {
 			return nil, fmt.Errorf("error downloading script content: %v", err)
 		}
@@ -566,7 +566,7 @@ func generateDallEPromptsForScript(client *openai.Client, svtContent string, vid
 
 	// strip all emojis away from the script
 	// script = StripEmoji(script)
-	sentences := SplitSVTIntoSentences(script)
+	sentences := SplitSRTIntoSentences(script)
 
 	var results []SentencePrompt
 	for _, sentence := range sentences {

@@ -2,10 +2,12 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"encoding/base64"
+	"fmt"
 	"log"
 	"strings"
+	"os"
+	"io"
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/option"
@@ -22,13 +24,12 @@ func InitializeGCP(projectID, bucketName, creds string) (*storage.Client, error)
 	return client, nil
 }
 
-
-func SaveSVTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, svtContent string) (string, error) {
+func SaveSRTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, srtContent string) (string, error) {
 	obj := bucket.Object(objectPath)
 	writer := obj.NewWriter(ctx)
-	_, err := writer.Write([]byte(svtContent))
+	_, err := writer.Write([]byte(srtContent))
 	if err != nil {
-		return "", fmt.Errorf("error writing SVT to bucket: %v", err)
+		return "", fmt.Errorf("error writing SRT to bucket: %v", err)
 	}
 	err = writer.Close()
 	if err != nil {
@@ -69,6 +70,25 @@ func GetGCPClient() (*storage.Client, error) {
 	return client, nil
 }
 
+func DownloadFile(ctx context.Context, storageClient *storage.Client, bucketName string, objectName string, destPath string) error {
+	bucket := storageClient.Bucket(bucketName)
+
+	src := bucket.Object(objectName)
+	reader, err := src.NewReader(ctx)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	_, err = io.Copy(dst, reader)
+	return err
+}
 
 // UploadImageToGCP uploads a base64 encoded image to GCP and returns the URL.
 func UploadImageToGCP(client *storage.Client, bucketName, objectName, base64Image string) (string, error) {
@@ -119,4 +139,3 @@ func UploadImageToGCP(client *storage.Client, bucketName, objectName, base64Imag
 	imageURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, objectName)
 	return imageURL, nil
 }
-

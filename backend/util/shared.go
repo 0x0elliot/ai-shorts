@@ -32,8 +32,8 @@ func Contains(arr []string, str string) bool {
 	return false
 }
 
-func SplitSVTIntoSentences(text string) []string {
-	// Define a regular expression to match the SVT blocks
+func SplitSRTIntoSentences(text string) []string {
+	// Define a regular expression to match the SRT blocks
 	// Each block contains an index number, a timestamp range, and the actual sentence
 	re := regexp.MustCompile(`(?m)^\d+\s+\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\s+(.*)$`)
 

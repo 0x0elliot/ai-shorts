@@ -1,10 +1,11 @@
 import os
-import cv2
-import pysrt
 import random
-import numpy as np
 from pathlib import Path
+
+import numpy as np
+import pysrt
 from moviepy.editor import *
+
 
 def time_to_seconds(time_obj):
     return time_obj.hours * 3600 + time_obj.minutes * 60 + time_obj.seconds + time_obj.milliseconds / 1000
@@ -17,7 +18,7 @@ def create_varied_clip(img_path, duration, effect):
         img = img.set_mask(None)  # Remove the alpha channel
     
     w, h = img.size
-    
+     
     if effect == "ken_burns":
         def ken_burns(t):
             zoom = 1 + t/duration * 0.1
@@ -71,38 +72,9 @@ def create_subtitle_clips(subs, video_size):
              .set_position(('center', 'center')))
             for sub in subs]
 
-def create_smooth_shake_transition(clip1, clip2, video_size, duration=0.5, shake_intensity=3):
-    w, h = video_size
-    
-    def make_frame(t):
-        progress = t / duration
-        
-        # Get frames from both clips
-        frame1 = clip1.get_frame(clip1.duration * (1 - 0.1 * (1 - progress)))
-        frame2 = clip2.get_frame(clip2.duration * (0.1 * progress))
-        
-        # Apply shake effect
-        shake_amount = shake_intensity * np.sin(progress * np.pi)  # Smooth shake curve
-        dx = int(shake_amount * (np.random.random() - 0.5))
-        dy = int(shake_amount * (np.random.random() - 0.5))
-        
-        # Apply shake to both frames
-        M1 = np.float32([[1, 0, dx], [0, 1, dy]])
-        M2 = np.float32([[1, 0, -dx], [0, 1, -dy]])  # Inverse shake for second frame
-        frame1 = cv2.warpAffine(frame1, M1, (w, h), borderMode=cv2.BORDER_REFLECT)
-        frame2 = cv2.warpAffine(frame2, M2, (w, h), borderMode=cv2.BORDER_REFLECT)
-        
-        # Smooth crossfade
-        weight = np.sin(progress * np.pi / 2)**2  # Smooth S-curve for transition
-        frame = cv2.addWeighted(frame1, 1-weight, frame2, weight, 0)
-        
-        return frame
-
-    return VideoClip(make_frame, duration=duration)
-
 def create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_file, whoosh_file):
     subs = pysrt.open(srt_file)
-    effects = ["ken_burns", "zoom_out", "pan"]
+    effects = ["ken_burns", "zoom_out", "pan", "static"]
     clips = []
     transitions = []
     
@@ -119,18 +91,12 @@ def create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_fi
         effect = random.choice(effects)
         clip = create_varied_clip(image_paths[i], duration, effect)
         
-        # Ensure the clip is in RGB format
-        if clip.get_frame(0).shape[2] == 4:  # If it has an alpha channel
-            clip = clip.set_mask(None)  # Remove the alpha channel
+        # Ensure all clips have the same size and format
+        clip = clip.resize(video_size)
+        if clip.get_frame(0).dtype != np.uint8:
+            clip = clip.set_position((0, 0))
         
         clips.append(clip)
-        
-        # Add transition after each clip (except the last one)
-        # if i < len(image_paths) - 1:
-        #     next_clip = create_varied_clip(image_paths[i+1], duration, random.choice(effects))
-        #     visual_transition = create_smooth_shake_transition(clip, next_clip, video_size, transition_duration)
-        #     transition_with_audio = visual_transition.set_audio(whoosh_audio)
-        #     transitions.append(transition_with_audio)
     
     # Combine clips with transitions
     final_clips = []

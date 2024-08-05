@@ -16,6 +16,9 @@ import (
 
 	models "go-authentication-boilerplate/models"
 
+	filepath "path/filepath"
+	"mime/multipart"
+
 	storage "cloud.google.com/go/storage"
 	genai "github.com/google/generative-ai-go/genai"
 	openai "github.com/sashabaranov/go-openai"
@@ -183,7 +186,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	video.Progress = 40
 	video.SRTGenerated = true
-	video.SRTURL = fmt.Sprintf("https://storage.googleapis.com/%s/videos/%s/subtitles/subtitles.srt", bucketName, video.ID)
+	video.SRTURL = fmt.Sprintf("https://storage.googleapis.com/%s/videos/%s/subtitles/subtitles.json", bucketName, video.ID)
 
 	video, err = SetVideo(video)
 	if err != nil {
@@ -192,18 +195,18 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		return nil, err
 	}
 
-	log.Printf("[INFO] Generating DALL-E prompts for video: %s", video.ID)
+	log.Printf("[INFO] Generating SDXL prompts for video: %s", video.ID)
 
 	prompts, err := generateDallEPromptsForScript(client, srtContent, video)
 	if err != nil {
-		log.Printf("[ERROR] Error generating DALL-E prompts: %v", err)
+		log.Printf("[ERROR] Error generating SDXL prompts: %v", err)
 		_ = SaveVideoError(video, err)
 		return nil, err
 	}
 
 	log.Printf("[INFO] Generated DALL-E prompts for video: %s", video.ID)
 
-	video.Progress = 45
+	video.Progress = 60
 	video.DALLEPromptGenerated = true
 
 	video, err = SetVideo(video)
@@ -227,7 +230,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Generated images for video: %s", video.ID)
 
-	video.Progress = 60
+	video.Progress = 80
 	video.DALLEGenerated = true
 
 	video, err = SetVideo(video)
@@ -240,6 +243,25 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	// call StitchVideo function
 	log.Printf("[INFO] Stitching video for video: %s", video.ID)
 
+	videoURL, err := StitchVideo(ctx, storageClient, bucketName, video.ID)
+	if err != nil {
+		log.Printf("[ERROR] Error stitching video: %v", err)
+		_ = SaveVideoError(video, err)
+		return nil, err
+	}
+
+	log.Printf("[INFO] Stitched video for video: %s", video.ID)
+
+	video.Progress = 100
+	video.VideoStitched = true
+	video.StitchedVideoURL = videoURL
+
+	video, err = SetVideo(video)
+	if err != nil {
+		log.Printf("[ERROR] Error saving video: %v", err)
+		_ = SaveVideoError(video, err)
+		return nil, err
+	}
 
 	return video, nil
 }
@@ -250,21 +272,17 @@ func generateSRTForTTSTranscript(ctx context.Context, client *storage.Client, bu
 
 	// Create a signed URL for the existing audio file
 	bucket := client.Bucket(bucketName)
-	// audioObj := bucket.Object(audioObjectPath)
 
-	// generate the audio URL from bucket
-	// example:
-	// https://storage.googleapis.com/zappush_public/videos/3291a801-3b3b-4018-b706-670fcce05563/image_1.png
-	audioURL := fmt.Sprintf("https://storage.googleapis.com/%s/%s", bucketName, audioObjectPath)
+	object := bucket.Object(audioObjectPath)
 
 	// Use Whisper to generate SRT content
-	srtContent, err := generateSRTWithWhisper(audioURL)
+	srtContent, err := generateSRTWithWhisper(ctx, object)
 	if err != nil {
 		return "", fmt.Errorf("error generating SRT with Whisper: %v", err)
 	}
 
 	// Save the SRT file to the bucket
-	srtObjectPath := fmt.Sprintf("videos/%s/subtitles/subtitles.srt", videoID)
+	srtObjectPath := fmt.Sprintf("videos/%s/subtitles/subtitles.json", videoID)
 	_, err = saveSRTToBucket(ctx, bucket, srtObjectPath, srtContent)
 	if err != nil {
 		return "", fmt.Errorf("error saving SRT to bucket: %v", err)
@@ -273,45 +291,70 @@ func generateSRTForTTSTranscript(ctx context.Context, client *storage.Client, bu
 	return srtContent, nil
 }
 
-func generateSRTWithWhisper(audioURL string) (string, error) {
-	openaiClient := openai.NewClient(OPENAI_API_KEY)
+func generateSRTWithWhisper(ctx context.Context, obj *storage.ObjectHandle) (string, error) {
+    // Create a temporary file to store the audio
+    tempFile, err := os.CreateTemp("", "audio*.mp3")
+    if err != nil {
+        return "", fmt.Errorf("error creating temporary file: %v", err)
+    }
+    defer os.Remove(tempFile.Name()) // Clean up the temp file when we're done
 
-	// Download the audio file from the bucket
-	resp, err := http.Get(audioURL)
-	if err != nil {
-		return "", fmt.Errorf("error downloading audio file: %v", err)
-	}
-	defer resp.Body.Close()
+    // Download the object data
+    r, err := obj.NewReader(ctx)
+    if err != nil {
+        return "", fmt.Errorf("error creating object reader: %v", err)
+    }
+    defer r.Close()
 
-	// Create a temporary file to store the audio
-	tempFile, err := os.CreateTemp("", "audio*.mp3")
-	if err != nil {
-		return "", fmt.Errorf("error creating temporary file: %v", err)
-	}
-	defer os.Remove(tempFile.Name()) // Clean up the temp file when we're done
+    // Copy the audio data to the temporary file
+    _, err = io.Copy(tempFile, r)
+    if err != nil {
+        return "", fmt.Errorf("error writing to temporary file: %v", err)
+    }
+    tempFile.Close()
 
-	// Copy the audio data to the temporary file
-	_, err = io.Copy(tempFile, resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error writing to temporary file: %v", err)
-	}
-	tempFile.Close()
+    // Prepare the multipart form data
+    body := &bytes.Buffer{}
+    writer := multipart.NewWriter(body)
+    file, err := os.Open(tempFile.Name())
+    if err != nil {
+        return "", fmt.Errorf("error opening temporary file: %v", err)
+    }
+    defer file.Close()
 
-	// Now use the temporary file for the Whisper API request
-	req := openai.AudioRequest{
-		Model:    openai.Whisper1,
-		FilePath: tempFile.Name(),
-		Format:   openai.AudioResponseFormatSRT,
-	}
+    part, err := writer.CreateFormFile("audio", filepath.Base(tempFile.Name()))
+    if err != nil {
+        return "", fmt.Errorf("error creating form file: %v", err)
+    }
+    _, err = io.Copy(part, file)
+    if err != nil {
+        return "", fmt.Errorf("error copying file to form: %v", err)
+    }
+    writer.Close()
 
-	respOA, err := openaiClient.CreateTranscription(context.Background(), req)
-	if err != nil {
-		log.Printf("[ERROR] Error creating transcription: %v", err)
-		return "", fmt.Errorf("error creating transcription: %v", err)
-	}
+    // Create and send the HTTP request
+    req, err := http.NewRequest("POST", "http://localhost:5000/generate_asr", body)
+    if err != nil {
+        return "", fmt.Errorf("error creating request: %v", err)
+    }
+    req.Header.Set("Content-Type", writer.FormDataContentType())
 
-	return respOA.Text, nil
+    httpClient := &http.Client{}
+    resp, err := httpClient.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("error sending request: %v", err)
+    }
+    defer resp.Body.Close()
+
+    // Read the response
+    srtContent, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return "", fmt.Errorf("error reading response: %v", err)
+    }
+
+    return string(srtContent), nil
 }
+
 
 func saveSRTToBucket(ctx context.Context, bucket *storage.BucketHandle, objectPath string, srtContent string) (string, error) {
 	obj := bucket.Object(objectPath)
@@ -361,7 +404,7 @@ func generateTTSForScript(ctx context.Context, client *openai.Client, storageCli
 
 func generateTTSForFullScript(client *openai.Client, script, narrator string) ([]byte, error) {
 	req := openai.CreateSpeechRequest{
-		Model: openai.TTSModel1,
+		Model: openai.TTSModel1HD,
 		Input: script,
 		Voice: openai.VoiceAlloy, // Default voice, adjust based on narrator preference
 	}
@@ -461,14 +504,21 @@ func generateImageForPrompt(prompt string, style ImageStyle, numImages int) ([]b
 
 	log.Printf("Generating image for prompt: %s", fullPrompt)
 
+	var seed int
+	var seedPtr *int
+
+	seed = 1075943719
+	seedPtr = &seed
+
 	reqBody := SDXLRequest{
 		ModelName:         "diffusion1XL",
 		Prompt:            fullPrompt,
 		ImageHeight:       1024,
 		ImageWidth:        1024,
 		NumOutputImages:   numImages,
-		GuidanceScale:     7.5,
-		NumInferenceSteps: 10,
+		GuidanceScale:     10,
+		NumInferenceSteps: 50,
+		Seed:              seedPtr,
 		OutputImgType:     "pil",
 	}
 
@@ -547,30 +597,16 @@ func saveImageToBucket(ctx context.Context, bucket *storage.BucketHandle, object
 	return attrs.MediaLink, nil
 }
 
-func generateDallEPromptsForScript(client *openai.Client, srtContent string, video *models.Video) ([]SentencePrompt, error) {
-	var script string
-
-	if len(srtContent) == 0 {
-		script = video.Script
-	} else {
-		// get the script content
-		resp, err := http.Get(video.SRTURL)
-		if err != nil {
-			return nil, fmt.Errorf("error downloading script content: %v", err)
-		}
-		defer resp.Body.Close()
-
-		scriptBytes, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("error reading script content: %v", err)
-		}
-
-		script = string(scriptBytes)
+func generateDallEPromptsForScript(client *openai.Client, scriptContent string, video *models.Video) ([]SentencePrompt, error) {
+	var asr ASR
+	err := json.Unmarshal([]byte(scriptContent), &asr)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling ASR content: %v", err)
 	}
 
 	// strip all emojis away from the script
 	// script = StripEmoji(script)
-	sentences := SplitSRTIntoSentences(script)
+	sentences := SplitScriptASRIntoSentences(asr.Sentences)
 
 	var results []SentencePrompt
 	for _, sentence := range sentences {
@@ -607,7 +643,10 @@ Description: %s
 Style Instruction: %s
 Guidelines for crafting the prompt:
 
+The sentence given to you is almost a sentence. Try to understand the context and generate a prompt that is visually appealing and creatively.
+
 Emphasize visual elements and atmosphere rather than literal interpretation of the sentence.
+IF Talking about a person, PLEASE instruct the prompt to keep their mouth closed.
 Use rich, descriptive language to convey mood, lighting, and textures.
 Incorporate specific artistic styles, techniques, or historical art movements mentioned in the style instruction.
 Avoid requesting text or specific logos. Focus on creating a vivid scene or concept.
@@ -616,11 +655,10 @@ Include relevant details from the topic and description to enhance context, but 
 Specify camera angles, perspectives, or composition when appropriate (e.g. "close-up view", "wide-angle shot", "birds-eye perspective").
 Mention color palettes or lighting conditions that fit the overall theme and style.
 Include details about materials, textures, or surface qualities to enhance realism or artistic effect.
-Use evocative adjectives and sensory language to make the prompt more vivid.
+Use evocative adjectives and sensory language to make the prompt more vivid. Be creative like a person who wants to grab your attention.
 Specify the desired level of detail or realism (e.g. "photorealistic", "impressionistic", "highly detailed").
 Avoid unnecessary formatting or markdown. Present the prompt as plain text.
 Keep the prompt concise but descriptive, aiming for 2-3 sentences maximum.
-If applicable, mention specific artists or art styles that align with the desired outcome.
 Focus on creating a cohesive, visually striking image that captures the essence of the sentence and context.
 `, formattedSentence, topic, description, styleInstruction)
 
@@ -705,15 +743,27 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 				},
 				{
 					Role: openai.ChatMessageRoleUser,
-					Content: fmt.Sprintf(`Generate detailed DALL-E 3 prompts for each of the following sentences from a video script. 
+					Content: fmt.Sprintf(`Generate detailed SDXL prompts for each of the following sentences from a video script.
                     Follow these guidelines for each prompt:
-                    1. Focus on a single, clear subject or concept from the sentence.
-                    2. Don't request text! Try to not include any text in the prompt. Go after the visual aspect of the sentence.
-					3. When you get a single sentence, without much context, Always refer to the full script to understand the context and generate a prompt that fits the overall theme of the video.
-					4. Never come up with prompts that show details of a screen. Focus on other aspects of the sentence.
-					5. Avoid prompts that ask for specific text or logos, banners etc. Focus on the visual aspect of the prompt.
-					6. The images you generate should feel like they belong in a high-quality video. They should be visually appealing and solid.
-					7. FOCUS on the ARTISTIC STYLE: %s
+					Emphasize visual elements and atmosphere rather than literal interpretation of the sentence.
+					IF Talking about a person, PLEASE instruct the prompt to keep their mouth closed.
+					Use rich, descriptive language to convey mood, lighting, and textures.
+					Incorporate specific artistic styles, techniques, or historical art movements mentioned in the style instruction.
+					Avoid requesting text or specific logos. Focus on creating a vivid scene or concept.
+					Use a format like "[Subject], [Setting], [Mood/Atmosphere], [Style], [Additional details]" to structure the prompt.
+					Include relevant details from the topic and description to enhance context, but prioritize visual appeal.
+					Specify camera angles, perspectives, or composition when appropriate (e.g. "close-up view", "wide-angle shot", "birds-eye perspective").
+					Mention color palettes or lighting conditions that fit the overall theme and style.
+					Include details about materials, textures, or surface qualities to enhance realism or artistic effect.
+					Use evocative adjectives and sensory language to make the prompt more vivid.
+					Specify the desired level of detail or realism (e.g. "photorealistic", "impressionistic", "highly detailed").
+					Avoid unnecessary formatting or markdown. Present the prompt as plain text.
+					Keep the prompt concise but descriptive, aiming for 2-3 sentences maximum.
+					If applicable, mention specific artists or art styles that align with the desired outcome.
+					Focus on creating a cohesive, visually striking image that captures the essence of the sentence and context.
+
+
+					Most importantly, your prompt must start with the artistic style: %s
 
 					The topic of the video is: %s
 					The description of the video is: %s
@@ -768,7 +818,7 @@ func getStyleInstruction(style string) string {
 	case "photorealistic":
 		return "Envision the prompt as a hyper-realistic photograph, with incredible detail, dramatic lighting, and perfect composition. Think of high-end editorial photography or the works of photorealistic painters like Chuck Close."
 	default:
-		return "Create the prompt as a vivid, high-definition digital painting, balancing realism with artistic flair. Include rich textures, dramatic lighting, and a cinematic quality to the composition."
+		return "Create a prompt for an ultra-realistic image with high detail, vivid colors, and dramatic lighting. The style should be photorealistic, similar to high-end editorial photography or the works of photorealistic painters like Chuck Close."
 	}
 }
 

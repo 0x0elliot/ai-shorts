@@ -12,21 +12,11 @@ import (
 	"strconv"
 	"bufio"
 
-	"github.com/golang/freetype"
-    "github.com/golang/freetype/truetype"
-    "golang.org/x/image/math/fixed"
-	"math"
+	"net/http"
+	"bytes"
+	"encoding/json"
 
-	// "github.com/fogleman/gg"
-	// "golang.org/x/image/font"
-	// "golang.org/x/image/font/opentype"
 	"cloud.google.com/go/storage"
-	// "github.com/asticode/go-astisub"
-
-	// "github.com/asticode/go-astikit"
-	"image"
-	"gocv.io/x/gocv"
-	"os/exec"
 )
 
 type Subtitle struct {
@@ -132,18 +122,51 @@ func StitchVideo(ctx context.Context, storageClient *storage.Client, bucketName,
 
 	log.Printf("Creating slideshow with subtitles..")
 
-	err := createSlideshowWithSubtitles(imagePaths, subtitlesPath, audioPath, filepath.Join(tempDir, "output.mp4"))
+	callStitchingAPI(imagePaths, audioPath, subtitlesPath, filepath.Join(tempDir, "output.mp4"))
+
+	return filepath.Join(tempDir, "output.mp4"), nil
+}
+
+func callStitchingAPI(imagePaths []string, audioPath, subtitlesPath, outputPath string) error {
+	// @app.route('/create_slideshow', methods=['POST'], from localhost:5000
+	req, err := http.NewRequest("POST", "http://localhost:5000/create_slideshow", nil)
 	if err != nil {
-		return "", fmt.Errorf("failed to create slideshow with subtitles: %v", err)
+		return fmt.Errorf("failed to create request: %v", err)
 	}
 
-	// check if the output file exists
-	outputFile := filepath.Join(tempDir, "output.mp4")
-	if _, err := os.Stat(outputFile); os.IsNotExist(err) {
-		return "", fmt.Errorf("output file does not exist: %v", err)
+	type SlideshowRequest struct {
+		ImagePaths    []string `json:"image_paths"`
+		AudioPath     string   `json:"audio_path"`
+		SubtitlesPath string   `json:"subtitles_path"`
 	}
 
-	return outputFile, nil
+	// Create the request body
+	slideshowRequest := SlideshowRequest{
+		ImagePaths:    imagePaths,
+		AudioPath:     audioPath,
+		SubtitlesPath: subtitlesPath,
+	}
+
+	// Marshal the request body
+	body, err := json.Marshal(slideshowRequest)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request body: %v", err)
+	}
+
+	// Set the request body
+	req.Body = ioutil.NopCloser(bytes.NewReader(body))
+
+	// Set the content type
+	req.Header.Set("Content-Type", "application/json")
+
+	// Send the request
+	client := &http.Client{}
+	_, err = client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+
+	return nil // for now
 }
 
 
@@ -231,10 +254,4 @@ func splitIntoLines(text string, maxChars int) []string {
     }
 
     return lines
-}
-
-func createSlideshowWithSubtitles(images []string, srtFile, audioFile, outputFile string) error {
-	// call the microservice that takes care of this
-	
-
 }

@@ -3,8 +3,19 @@ package util
 import (
 	"encoding/base64"
 	"os"
-	"regexp"
+	"strings"
+	"bufio"
 )
+
+type ASRSentences struct {
+	// End int `json:"end"`
+	// Start int `json:"start"`
+	Text string `json:"text"`
+}
+
+type ASR struct {
+	Sentences []ASRSentences `json:"sentences"`
+}
 
 func isDevMode() bool {
 	return os.Getenv("USE_GEMINI") == "true"
@@ -32,23 +43,45 @@ func Contains(arr []string, str string) bool {
 	return false
 }
 
-func SplitSRTIntoSentences(text string) []string {
-	// Define a regular expression to match the SRT blocks
-	// Each block contains an index number, a timestamp range, and the actual sentence
-	re := regexp.MustCompile(`(?m)^\d+\s+\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\s+(.*)$`)
-
-	// Find all matches
-	matches := re.FindAllStringSubmatch(text, -1)
-
-	// Extract the sentences
-	var sentences []string
-	for _, match := range matches {
-		if len(match) > 1 {
-			sentences = append(sentences, match[1])
-		}
+func SplitScriptASRIntoSentences(sentences []ASRSentences) []string {
+	var result []string
+	for _, sentence := range sentences {
+		// skip the first character of the sentence
+		// because it is always a space
+		result = append(result, sentence.Text[1:])
 	}
+	return result
+}
 
-	return sentences
+func SplitSRTIntoSentences(wordLevelSRT string) []string {
+    var sentences []string
+    var currentSentence []string
+
+    scanner := bufio.NewScanner(strings.NewReader(wordLevelSRT))
+    for scanner.Scan() {
+        line := strings.TrimSpace(scanner.Text())
+        
+        // Skip empty lines and timestamp lines
+        if line == "" || strings.Contains(line, "-->") {
+            continue
+        }
+        
+        // Add word to current sentence
+        currentSentence = append(currentSentence, line)
+        
+        // Check if the word ends a sentence
+        if strings.HasSuffix(line, ".") || strings.HasSuffix(line, "!") || strings.HasSuffix(line, "?") {
+            sentences = append(sentences, strings.Join(currentSentence, " "))
+            currentSentence = nil
+        }
+    }
+
+    // Add any remaining words as a sentence
+    if len(currentSentence) > 0 {
+        sentences = append(sentences, strings.Join(currentSentence, " "))
+    }
+
+    return sentences
 }
 
 func ContainsInt64(arr []int64, num int64) bool {

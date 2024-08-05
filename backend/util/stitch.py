@@ -1,11 +1,21 @@
 import os
 import random
 from pathlib import Path
+import tempfile
+import whisper
 
 import numpy as np
 import pysrt
 from moviepy.editor import *
+from flask import Flask, request, jsonify, send_file
 
+app = Flask(__name__)
+
+image_paths = sorted([f'/tmp/{f}' for f in os.listdir('/tmp') if f.startswith('image_')])
+srt_file = '/tmp/subtitles.srt'
+audio_file = '/tmp/full_audio.mp3'
+whoosh_file = "/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/15. Whoosh Swoosh.wav"
+output_file = '/tmp/output.mp4'
 
 def time_to_seconds(time_obj):
     return time_obj.hours * 3600 + time_obj.minutes * 60 + time_obj.seconds + time_obj.milliseconds / 1000
@@ -74,7 +84,8 @@ def create_subtitle_clips(subs, video_size):
 
 def create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_file, whoosh_file):
     subs = pysrt.open(srt_file)
-    effects = ["ken_burns", "zoom_out", "pan", "static"]
+    # effects = ["ken_burns", "zoom_out", "pan", "static"]
+    effects = [ "static" ] # for now
     clips = []
     transitions = []
     
@@ -121,11 +132,65 @@ def create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_fi
     print(f"Final video shape: {final_video.get_frame(0).shape}")
     
     final_video.write_videofile(output_file, fps=60, audio_codec='aac')
+    
+def generate_word_level_srt(audio_file):
+    model = whisper.load_model("base")
+    result = model.transcribe(audio_file, word_timestamps=True)
+    
+    srt_content = []
+    for i, segment in enumerate(result["segments"], start=1):
+        for j, word in enumerate(segment["words"], start=1):
+            start = word["start"]
+            end = word["end"]
+            text = word["word"]
+            
+            start_time = f"{int(start // 3600):02d}:{int((start % 3600) // 60):02d}:{int(start % 60):02d},{int((start % 1) * 1000):03d}"
+            end_time = f"{int(end // 3600):02d}:{int((end % 3600) // 60):02d}:{int(end % 60):02d},{int((end % 1) * 1000):03d}"
+            
+            srt_content.append(f"{i}.{j}\n{start_time} --> {end_time}\n{text}\n\n")
+    
+    return "".join(srt_content)
+
+@app.route('/generate_srt', methods=['POST'])
+def generate_srt():
+    if 'audio' not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+    
+    audio_file = request.files['audio']
+    
+    if audio_file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if audio_file and audio_file.filename.endswith('.mp3'):
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_audio:
+            audio_file.save(temp_audio.name)
+            srt_content = generate_word_level_srt(temp_audio.name)
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".srt", mode="w", encoding="utf-8") as temp_srt:
+            temp_srt.write(srt_content)
+        
+        return send_file(temp_srt.name, as_attachment=True, download_name="subtitles.srt")
+    else:
+        return jsonify({"error": "Invalid file format. Please upload an MP3 file."}), 400
+ 
+@app.route('/create_slideshow', methods=['POST'])
+def api_create_slideshow():
+    data = request.json
+    
+    # image_paths = data.get('image_paths')        
+    # srt_file = data.get('srt_file')
+    # audio_file = data.get('audio_file')
+    # whoosh_file = data.get('whoosh_file')
+    # output_file = data.get('output_file')
+
+    if not all([image_paths, srt_file, audio_file, whoosh_file, output_file]):
+        return jsonify({"error": "Missing required parameters"}), 400
+
+    try:
+        create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_file, whoosh_file)
+        return jsonify({"message": "Slideshow created successfully", "output_file": output_file}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    image_paths = sorted([f'/tmp/{f}' for f in os.listdir('/tmp') if f.startswith('image_')])
-    srt_file = '/tmp/subtitles.srt'
-    audio_file = '/tmp/full_audio.mp3'
-    whoosh_file = "/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/15. Whoosh Swoosh.wav"
-    output_file = '/tmp/output.mp4'
-    create_slideshow_with_subtitles(image_paths, srt_file, audio_file, output_file, whoosh_file)
+    app.run(debug=True)

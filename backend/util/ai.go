@@ -237,6 +237,10 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		return nil, err
 	}
 
+	// call StitchVideo function
+	log.Printf("[INFO] Stitching video for video: %s", video.ID)
+
+
 	return video, nil
 }
 
@@ -596,24 +600,28 @@ func generateDallEPromptForSentenceGemini(formattedSentence string, video *model
 
 	styleInstruction := getStyleInstruction(style)
 
-	prompt := fmt.Sprintf(`Generate a detailed DALL-E 3 prompt based on the following information:
-
+	prompt := fmt.Sprintf(`Generate a detailed SDXL prompt based on the following information:
 Sentence: %s
 Topic: %s
 Description: %s
 Style Instruction: %s
+Guidelines for crafting the prompt:
 
-Guidelines for the prompt:
-1. Focus on a single, clear subject or concept from the sentence.
-2. Don't request text! Try to not include any text in the prompt. Go after the visual aspect of the sentence.
-3. Always refer to the full context (topic and description) to generate a prompt that fits the overall theme.
-4. Never come up with prompts that show details of a screen. Focus on other aspects of the sentence.
-5. Avoid prompts that ask for specific text or logos, banners etc. Focus on the visual aspect of the prompt.
-6. The images you generate should feel like they belong in a high-quality video. They should be visually appealing and solid.
-7. FOCUS on the ARTISTIC STYLE provided in the style instruction.
-8. At all cost, Avoid unnecessary markdown or formatting in the prompt. Whatever you reply, will be used as it is.
-
-Please format your response in a simple way, without any additional information or formatting.
+Emphasize visual elements and atmosphere rather than literal interpretation of the sentence.
+Use rich, descriptive language to convey mood, lighting, and textures.
+Incorporate specific artistic styles, techniques, or historical art movements mentioned in the style instruction.
+Avoid requesting text or specific logos. Focus on creating a vivid scene or concept.
+Use a format like "[Subject], [Setting], [Mood/Atmosphere], [Style], [Additional details]" to structure the prompt.
+Include relevant details from the topic and description to enhance context, but prioritize visual appeal.
+Specify camera angles, perspectives, or composition when appropriate (e.g. "close-up view", "wide-angle shot", "birds-eye perspective").
+Mention color palettes or lighting conditions that fit the overall theme and style.
+Include details about materials, textures, or surface qualities to enhance realism or artistic effect.
+Use evocative adjectives and sensory language to make the prompt more vivid.
+Specify the desired level of detail or realism (e.g. "photorealistic", "impressionistic", "highly detailed").
+Avoid unnecessary formatting or markdown. Present the prompt as plain text.
+Keep the prompt concise but descriptive, aiming for 2-3 sentences maximum.
+If applicable, mention specific artists or art styles that align with the desired outcome.
+Focus on creating a cohesive, visually striking image that captures the essence of the sentence and context.
 `, formattedSentence, topic, description, styleInstruction)
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))

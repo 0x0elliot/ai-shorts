@@ -118,7 +118,7 @@ def create_subtitle_clip(words, video_size, max_duration):
                 current_text = []
                 current_start = words[i+1]['start'] if i + 1 < len(words) else word['end']
 
-    subtitle_clip = CompositeVideoClip(word_clips, size=video_size, use_gpu=True).set_duration(max_duration)
+    subtitle_clip = CompositeVideoClip(word_clips, size=video_size, ).set_duration(max_duration)
     return subtitle_clip
 
 def create_slideshow_with_subtitles(image_paths, asr_data, audio_file, output_file):

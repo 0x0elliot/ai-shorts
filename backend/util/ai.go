@@ -608,7 +608,7 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 
 func generateDallEPromptForSentenceGemini(formattedSentence string, video *models.Video) (string, error) {
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("ACIDRAIN_GEMINI_KEY")))
+	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
 		return "", fmt.Errorf("error creating Gemini client: %v", err)
 	}
@@ -747,7 +747,7 @@ func processContent(client *openai.Client, topic, description string) (string, s
 
 func processContentGemini(topic, description string) (string, string, error) {
 	ctx := context.Background()
-	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("ACIDRAIN_GEMINI_KEY")))
+	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
 		return "", "", fmt.Errorf("error creating Gemini client: %v", err)
 	}

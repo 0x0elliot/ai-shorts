@@ -1,5 +1,6 @@
 use warp::Filter;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::convert::Infallible;
 use std::cmp::Ordering;
 use std::process::Command;
@@ -8,6 +9,7 @@ use log::{debug, info, error};
 
 use std::fs;
 use std::path::{PathBuf, Path};
+use std::env;
 
 const REEL_ASPECT_RATIO: f32 = 9.0 / 16.0;
 const REEL_WIDTH: u32 = 1080;
@@ -35,7 +37,7 @@ struct ASRData {
 
 #[derive(Debug, Deserialize)]
 struct CreateSlideshowRequest {
-    asr_data: ASRData,
+    video_id: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -44,9 +46,43 @@ struct CreateSlideshowResponse {
     output_file: String,
 }
 
+fn get_video_folder_path(video_id: &str) -> PathBuf {
+    let home_dir = env::var("HOME").expect("HOME environment variable not set");
+    PathBuf::from(home_dir).join("Desktop").join("reels").join(video_id)
+}
+
+// fn get_video_folder_path(video_id: &str) -> PathBuf {
+//     PathBuf::from(format!("/tmp/{}", video_id))
+// }
+
 async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Reply, Infallible> {
-    let image_paths: Vec<PathBuf> = fs::read_dir("/tmp")
-        .unwrap()
+    let video_folder = get_video_folder_path(&req.video_id);
+    let subtitles_path = video_folder.join("subtitles/subtitles.json");
+    let audio_file = video_folder.join("full_audio.mp3");
+    let output_file = video_folder.join("output_rust.mp4");
+
+    // Read and parse the subtitles.json file
+    let asr_data: ASRData = match fs::read_to_string(&subtitles_path) {
+        Ok(content) => match serde_json::from_str(&content) {
+            Ok(data) => data,
+            Err(e) => {
+                return Ok(warp::reply::json(&CreateSlideshowResponse {
+                    message: format!("Error parsing subtitles.json: {}", e),
+                    output_file: "".to_string(),
+                }))
+            }
+        },
+        Err(e) => {
+            return Ok(warp::reply::json(&CreateSlideshowResponse {
+                message: format!("Error reading subtitles.json: {}", e),
+                output_file: "".to_string(),
+            }))
+        }
+    };
+
+    // Get image paths
+    let image_paths: Vec<PathBuf> = fs::read_dir(video_folder.join("images"))
+        .unwrap_or_else(|_| panic!("Failed to read images directory for video ID: {}", req.video_id))
         .filter_map(|entry| {
             let entry = entry.unwrap();
             let path = entry.path();
@@ -58,18 +94,15 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
         })
         .collect();
 
-    let audio_file = "/tmp/full_audio.mp3";
-    let output_file = "/tmp/output_rust.mp4";
+    println!("ASR data: {:?}", asr_data);
+    println!("Audio file: {}", audio_file.display());
+    println!("Output file: {}", output_file.display());
 
-    println!("ASR data: {:?}", req.asr_data);
-    println!("Audio file: {}", audio_file);
-    println!("Output file: {}", output_file);
-
-    match create_slideshow_with_subtitles(&image_paths, &req.asr_data, audio_file, output_file) {
+    match create_slideshow_with_subtitles(&image_paths, &asr_data, &audio_file.to_str().unwrap(), &output_file.to_str().unwrap()) {
         Ok(_) => {
             let response = CreateSlideshowResponse {
                 message: "Slideshow created successfully".to_string(),
-                output_file: output_file.to_string(),
+                output_file: output_file.to_str().unwrap().to_string(),
             };
             Ok(warp::reply::json(&response))
         },

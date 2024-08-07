@@ -18,7 +18,7 @@ type ASR struct {
 }
 
 func isDevMode() bool {
-	return os.Getenv("USE_GEMINI") == "true"
+return os.Getenv("USE_GEMINI") == "true"
 }
 
 func StripEmoji(s string) string {

@@ -153,9 +153,26 @@ fn create_slideshow_with_subtitles(
     
     // Combine video and audio
     filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
+
+    // Add word highlighting
+    let mut word_filter = String::new();
+    for word in asr_data.words.iter() {
+        let text = word.word.replace("'", "'\\\\\\''").replace(":", "\\:"); // Escape single quotes and colons
+        word_filter.push_str(&format!(
+            "drawtext=fontfile=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf:fontsize=120:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-tw)/2:y=(h-th)/2:text='{}':enable='between(t,{},{})':alpha='if(between(t,{},{}),1,0)',",
+            text, word.start, word.end, word.start, word.end
+        ));
+        
+        // Highlight the current word
+        word_filter.push_str(&format!(
+            "drawtext=fontfile=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf:fontsize=120:fontcolor=yellow:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-tw)/2:y=(h-th)/2:text='{}':enable='between(t,{},{})':alpha='if(between(t,{},{}),1,0)',",
+            text, word.start, word.end, word.start, word.end
+        ));
+    }
     
-    // Add subtitles to the complex filter
-    filter_complex.push_str("[outv_a]subtitles=/tmp/subtitles.srt:force_style='FontSize=24,Alignment=10'[output]");
+    // Remove trailing comma and add to filter complex
+    word_filter.pop();
+    filter_complex.push_str(&format!("[outv_a]{}[output]", word_filter));
 
     ffmpeg_args.extend(vec!["-filter_complex".to_string(), filter_complex]);
 

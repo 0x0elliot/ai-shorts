@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"sync"
 	"mime/multipart"
 
@@ -83,6 +84,8 @@ func SaveVideoError(video *models.Video, err error) error {
 }
 
 func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
+	startTime := time.Now()
+
 	client := openai.NewClient(OPENAI_API_KEY)
 
 	if recreate {
@@ -174,34 +177,6 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		return nil, SaveVideoError(video, err)
 	}
 
-	log.Printf("[INFO] Generating DALL-E prompts for video: %s", video.ID)
-
-	// prompts, err := generateAndSaveImagesForScript(client, video)
-	// if err != nil {
-	// 	log.Printf("[ERROR] Error generating DALL-E prompts: %v", err)
-	// 	return nil, SaveVideoError(video, err)
-	// }
-
-	// log.Printf("[INFO] Generated DALL-E prompts for video: %s", video.ID)
-
-	// video.Progress = 60
-	// video.DALLEPromptGenerated = true
-
-	// video, err = SetVideo(video)
-	// if err != nil {
-	// 	log.Printf("[ERROR] Error saving video: %v", err)
-	// 	return nil, SaveVideoError(video, err)
-	// }
-
-	// log.Printf("Generated %d prompts for the video script", len(prompts))
-
-	// log.Printf("[INFO] Generating images for video: %s", video.ID)
-
-	// if err := generateImagesForScript(client, video, prompts); err != nil {
-	// 	log.Printf("[ERROR] Error generating images: %v", err)
-	// 	return nil, SaveVideoError(video, err)
-	// }
-
 	log.Printf("[INFO] Generating images (after generating prompt for each sentence) for video: %s", video.ID)
 
 	err = generateAndSaveImagesForScript(client, video)
@@ -241,6 +216,10 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		log.Printf("[ERROR] Error saving video: %v", err)
 		return nil, SaveVideoError(video, err)
 	}
+
+	endTime := time.Now()
+
+	log.Printf("[INFO] Video processing completed in %v", endTime.Sub(startTime))
 
 	return video, nil
 
@@ -350,28 +329,6 @@ func generateSRTWithWhisper(audioFilePath string) (string, error) {
 	return string(srtContent), nil
 }
 
-func generateImagesForScript(client *openai.Client, video *models.Video, sentencePrompts []SentencePrompt) error {
-	folderPath := filepath.Join(getVideoFolderPath(video.ID), "images")
-	if err := os.MkdirAll(folderPath, 0755); err != nil {
-		return fmt.Errorf("error creating images folder: %v", err)
-	}
-
-	for i, sp := range sentencePrompts {
-		imageData, err := generateImageForPrompt(sp.Prompt, ImageStyle(video.VideoStyle), 1)
-		if err != nil {
-			return fmt.Errorf("error generating image for prompt %d: %v", i+1, err)
-		}
-
-		filename := fmt.Sprintf("image_%d.png", i+1)
-		filePath := filepath.Join(folderPath, filename)
-
-		if err := ioutil.WriteFile(filePath, imageData, 0644); err != nil {
-			return fmt.Errorf("error saving image %d: %v", i+1, err)
-		}
-	}
-	return nil
-}
-
 func generateImageForPrompt(prompt string, style ImageStyle, numImages int) ([]byte, error) {
 	fullPrompt := prompt
 
@@ -451,25 +408,22 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 	if err != nil {
 		return fmt.Errorf("error reading SRT file: %v", err)
 	}
-
 	var asr ASR
 	err = json.Unmarshal(srtContent, &asr)
 	if err != nil {
 		return fmt.Errorf("error unmarshalling ASR content: %v", err)
 	}
-
 	sentences := SplitScriptASRIntoSentences(asr.Sentences)
-
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(sentences))
-
 	// Semaphore to limit the number of concurrent goroutines
 	semaphore := make(chan struct{}, 5) // Adjust this number based on your needs and API rate limits
-
 	folderPath := filepath.Join(getVideoFolderPath(video.ID), "images")
 	if err := os.MkdirAll(folderPath, 0755); err != nil {
 		return fmt.Errorf("error creating images folder: %v", err)
 	}
+
+	retryDelays := []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second}
 
 	for i, sentence := range sentences {
 		wg.Add(1)
@@ -480,17 +434,39 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }() // Release semaphore
 
-			// Generate DALL-E prompt
-			prompt, err := generateDallEPromptForSentence(client, s, video)
+			var prompt string
+			var imageData []byte
+			var err error
+
+			// Retry loop for prompt generation
+			for retryCount := 0; retryCount <= len(retryDelays); retryCount++ {
+				prompt, err = generateDallEPromptForSentence(client, s, video)
+				if err == nil {
+					break
+				}
+				if retryCount < len(retryDelays) {
+					log.Printf("Error generating prompt for sentence '%s', retrying in %v: %v", s, retryDelays[retryCount], err)
+					time.Sleep(retryDelays[retryCount])
+				}
+			}
 			if err != nil {
-				errorChan <- fmt.Errorf("error generating prompt for sentence '%s': %v", s, err)
+				errorChan <- fmt.Errorf("[ERROR] failed to generate prompt for sentence '%s' after all retries: %v", s, err)
 				return
 			}
 
-			// Generate image
-			imageData, err := generateImageForPrompt(prompt, ImageStyle(video.VideoStyle), 1)
+			// Retry loop for image generation
+			for retryCount := 0; retryCount <= len(retryDelays); retryCount++ {
+				imageData, err = generateImageForPrompt(prompt, ImageStyle(video.VideoStyle), 1)
+				if err == nil {
+					break
+				}
+				if retryCount < len(retryDelays) {
+					log.Printf("[ERROR] Error generating image for prompt %d, retrying in %v: %v", index+1, retryDelays[retryCount], err)
+					time.Sleep(retryDelays[retryCount])
+				}
+			}
 			if err != nil {
-				errorChan <- fmt.Errorf("error generating image for prompt %d: %v", index+1, err)
+				errorChan <- fmt.Errorf("failed to generate image for prompt %d after all retries: %v", index+1, err)
 				return
 			}
 
@@ -503,24 +479,26 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 			}
 		}(i, sentence)
 	}
-
 	wg.Wait()
 	close(errorChan)
 
 	// Check for errors
+	var errors []string
 	for err := range errorChan {
 		if err != nil {
-			return err
+			errors = append(errors, err.Error())
 		}
 	}
-
+	if len(errors) > 0 {
+		return fmt.Errorf("errors occurred during image generation: %s", strings.Join(errors, "; "))
+	}
 	return nil
 }
 
 func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, video *models.Video) (string, error) {
-	if isDevMode() {
-		return generateDallEPromptForSentenceGemini(formattedSentence, video)
-	}
+	// if isDevMode() {
+	// 	return generateDallEPromptForSentenceGemini(formattedSentence, video)
+	// }
 
 	functionDescription := openai.FunctionDefinition{
 		Name:        "generate_dalle_prompt",
@@ -555,6 +533,7 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 					IF Talking about a person, PLEASE instruct the prompt to keep their mouth closed.
 					Use rich, descriptive language to convey mood, lighting, and textures.
 					Incorporate specific artistic styles, techniques, or historical art movements mentioned in the style instruction.
+					Try to convert any concerning "sexually explicit" content into a more general and safe-for-work context. Don't just remove the content, but try to replace it with something that fits the context.
 					Avoid requesting text or specific logos. Focus on creating a vivid scene or concept.
 					Use a format like "[Subject], [Setting], [Mood/Atmosphere], [Style], [Additional details]" to structure the prompt.
 					Include relevant details from the topic and description to enhance context, but prioritize visual appeal.
@@ -601,6 +580,7 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 
 	err = json.Unmarshal([]byte(functionArgs), &result)
 	if err != nil {
+		log.Printf("Result from AI: %s", functionArgs)
 		return "", fmt.Errorf("error parsing AI response: %v", err)
 	}
 	return result.Prompt, nil
@@ -632,6 +612,7 @@ IF Talking about a person, PLEASE instruct the prompt to keep their mouth closed
 Use rich, descriptive language to convey mood, lighting, and textures.
 Incorporate specific artistic styles, techniques, or historical art movements mentioned in the style instruction.
 Avoid requesting text or specific logos. Focus on creating a vivid scene or concept.
+Try to convert any concerning "sexually explicit" content into a more general and safe-for-work context. Don't just remove the content, but try to replace it with something that fits the context.
 Use a format like "[Subject], [Setting], [Mood/Atmosphere], [Style], [Additional details]" to structure the prompt.
 Include relevant details from the topic and description to enhance context, but prioritize visual appeal.
 Specify camera angles, perspectives, or composition when appropriate (e.g. "close-up view", "wide-angle shot", "birds-eye perspective").
@@ -681,9 +662,9 @@ func getStyleInstruction(style string) string {
 }
 
 func processContent(client *openai.Client, topic, description string) (string, string, error) {
-	if isDevMode() {
-		return processContentGemini(topic, description)
-	}
+	// if isDevMode() {
+	// 	return processContentGemini(topic, description)
+	// }
 
 	functionDescription := openai.FunctionDefinition{
 		Name:        "process_content",
@@ -732,13 +713,17 @@ func processContent(client *openai.Client, topic, description string) (string, s
 	}
 
 	functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
+	// clean functionArgs of \n
+	functionArgs = strings.ReplaceAll(functionArgs, "\n", "")
 
 	var result struct {
 		CleanedTopic string `json:"cleaned_topic"`
 		Script       string `json:"script"`
 	}
+
 	err = json.Unmarshal([]byte(functionArgs), &result)
 	if err != nil {
+		log.Printf("Result from AI: %s", functionArgs)
 		return "", "", fmt.Errorf("error parsing AI response: %v", err)
 	}
 

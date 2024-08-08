@@ -56,9 +56,12 @@ fn get_video_folder_path(video_id: &str) -> PathBuf {
 // }
 
 async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Reply, Infallible> {
+
+    println!("Creating slideshow for video ID: {}", req.video_id);
+
     let video_folder = get_video_folder_path(&req.video_id);
     let subtitles_path = video_folder.join("subtitles/subtitles.json");
-    let audio_file = video_folder.join("full_audio.mp3");
+    let audio_file = video_folder.join("audio/full_audio.mp3");
     let output_file = video_folder.join("output_rust.mp4");
 
     // Read and parse the subtitles.json file
@@ -107,6 +110,7 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
             Ok(warp::reply::json(&response))
         },
         Err(e) => {
+            println!("Error creating slideshow for videoID: {}: {}", req.video_id, e);
             let error_response = CreateSlideshowResponse {
                 message: format!("Error creating slideshow: {}", e),
                 output_file: "".to_string(),

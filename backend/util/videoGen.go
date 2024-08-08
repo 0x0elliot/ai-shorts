@@ -11,7 +11,7 @@ import (
 )
 
 func StitchVideo(videoID string) (error) {
-	log.Printf("Creating slideshow with subtitles..")
+	log.Printf("[INFO] Creating slideshow with subtitles..")
 
 	err := callStitchingAPI(videoID)
 	if err != nil {
@@ -51,8 +51,14 @@ func callStitchingAPI(videoID string) error {
 
 	// Send the request
 	client := &http.Client{}
-	_, err = client.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
+		return fmt.Errorf("failed to send request: %v", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		log.Printf("[ERROR] Failed to create slideshow with subtitles. The response body is: %v with status code: %v", res.Body, res.StatusCode)
+
 		return fmt.Errorf("failed to send request: %v", err)
 	}
 

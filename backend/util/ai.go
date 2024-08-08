@@ -89,6 +89,25 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	client := openai.NewClient(OPENAI_API_KEY)
 
 	if recreate {
+
+		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
+			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
+			if err := StitchVideo(video.ID); err != nil {
+				log.Printf("[ERROR] Error stitching video: %v", err)
+				return nil, SaveVideoError(video, err)
+			} else {
+				// Update video progress
+				video.Progress = 100
+				video.VideoStitched = true
+
+				video, err := SetVideo(video)
+				if err != nil {
+					log.Printf("[ERROR] Error saving video: %v", err)
+					return nil, SaveVideoError(video, err)
+				}
+			}
+		}
+
 		folderPath := getVideoFolderPath(video.ID)
 		if err := os.RemoveAll(folderPath); err != nil {
 			log.Printf("[ERROR] Error deleting folder: %v", err)
@@ -496,9 +515,9 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 }
 
 func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, video *models.Video) (string, error) {
-	// if isDevMode() {
-	// 	return generateDallEPromptForSentenceGemini(formattedSentence, video)
-	// }
+	if isDevMode() {
+		return generateDallEPromptForSentenceGemini(formattedSentence, video)
+	}
 
 	functionDescription := openai.FunctionDefinition{
 		Name:        "generate_dalle_prompt",
@@ -662,9 +681,9 @@ func getStyleInstruction(style string) string {
 }
 
 func processContent(client *openai.Client, topic, description string) (string, string, error) {
-	// if isDevMode() {
-	// 	return processContentGemini(topic, description)
-	// }
+	if isDevMode() {
+		return processContentGemini(topic, description)
+	}
 
 	functionDescription := openai.FunctionDefinition{
 		Name:        "process_content",
@@ -747,7 +766,9 @@ Description: %s
 
 You are a script writer for social media to help with TikTok, Instagram, YouTube Shorts, and other short-form video content. Create a cleaned topic and script based on the given topic and description. The script should be engaging and informative, suitable for a 60-80 second video.
 
-Please format your response as a JSON object with the following structure:
+Make sure to not include any [ ] or any guidance on how to shoot the video or camera angles in the script.
+
+Please format your response as a JSON object with the following structure: (Make sure to remove the backticks, JSON formatting, new lines, and double quotes) 
 {
     "cleaned_topic": "A more attractive and engaging version of the original topic",
     "script": "A 60-80 second script for the video (more than 200 words)"

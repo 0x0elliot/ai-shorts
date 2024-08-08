@@ -273,7 +273,7 @@ fn format_time(seconds: f64) -> String {
 async fn main() {
     let create_slideshow = warp::post()
         .and(warp::path("create_slideshow"))
-        .and(warp::body::content_length_limit(1024 * 1024 * 50))
+        // .and(warp::body::content_length_limit(1024 * 1024 * 50))
         .and(warp::body::json())
         .and_then(create_slideshow);
 

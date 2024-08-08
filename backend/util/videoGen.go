@@ -23,7 +23,7 @@ func StitchVideo(videoID string) (error) {
 
 func callStitchingAPI(videoID string) error {
 	// @app.route('/create_slideshow', methods=['POST'], from localhost:5000
-	req, err := http.NewRequest("POST", "http://localhost:8080/create_slideshow", nil)
+	req, err := http.NewRequest("POST", "http://127.0.0.1:8080/create_slideshow", nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
 	}
@@ -49,10 +49,13 @@ func callStitchingAPI(videoID string) error {
 	// Set the content type
 	req.Header.Set("Content-Type", "application/json")
 
+	log.Printf("[INFO] Sending request to create slideshow with subtitles..")
+
 	// Send the request
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
+		log.Printf("[ERROR] Failed to create slideshow with subtitles. The response body is: %v with status code: %v", res.Body, res.StatusCode)
 		return fmt.Errorf("failed to send request: %v", err)
 	}
 

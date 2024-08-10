@@ -8,7 +8,7 @@ import { siteConfig } from '@/app/siteConfig'
 import { motion } from 'framer-motion'
 import confetti from 'canvas-confetti'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, Tag, Clock } from 'lucide-react'
+import { CheckCircle2, Tag, Clock, Download } from 'lucide-react'
 
 const progressSteps = [
   { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
@@ -33,6 +33,43 @@ export default function EditCreate() {
     const { toast } = useToast()
     const { id } = useParams()
     
+    const handleDownload = async () => {
+        if (video.videoURL) {
+            try {
+                const response = await fetch(video.videoURL, 
+                    {
+                        headers: {
+                            'Access-Control-Allow-Origin': '*',
+                            'Content-Type': 'application/octet-stream',
+                        },
+                    }
+                );
+
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `video_${id}.mp4`;
+                document.body.appendChild(link);
+                link.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(link);
+                
+                toast({
+                    title: "Download Started",
+                    description: "Your video is downloading. Check your downloads folder!",
+                })
+            } catch (error) {
+                console.error('Download failed:', error);
+                toast({
+                    variant: 'destructive',
+                    title: "Download Failed",
+                    description: "There was an error downloading your video. Please try again.",
+                })
+            }
+        }
+    }
+
     const [progress, setProgress] = useState(0)
     const [error, setError] = useState(null)
     const [status, setStatus] = useState('Brewing your video magic...')
@@ -103,8 +140,11 @@ export default function EditCreate() {
         setCompletedSteps(completed)
         setProgress(video.progress)
     
-        if (video.progress === 100 && !confettiShown) {
+        if (video.progress === 100) {
             setStatus('Ta-da! Your video masterpiece is ready!')
+
+            if (confettiShown) return
+
             confetti({
                 particleCount: 100,
                 spread: 70,
@@ -230,7 +270,7 @@ export default function EditCreate() {
                                 ))}
                             </div>
 
-                            {progress === 100 && video.video_url && (
+                            {progress === 100 && video.videoURL && (
                                 <motion.div
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
@@ -240,10 +280,20 @@ export default function EditCreate() {
                                     <p className="text-green-500 font-semibold mb-4">
                                         🎉 Bravo! Your video is ready for its debut!
                                     </p>
+                                    <div className="flex justify-center items-center mb-4">
+                                        <Button
+                                            onClick={handleDownload}
+                                            className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded flex items-center"
+                                        >
+                                            <Download className="mr-2" size={16} />
+                                            Download Video
+                                        </Button>
+                                    </div>
+
                                     <video
                                         controls
                                         className="w-full max-w-2xl mx-auto rounded-lg shadow-lg"
-                                        src={video.video_url}
+                                        src={video.videoURL}
                                     >
                                         Your browser does not support the video tag.
                                     </video>

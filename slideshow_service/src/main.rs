@@ -1,15 +1,20 @@
 use warp::Filter;
 use serde::{Deserialize, Serialize};
-use serde_json;
-use std::convert::Infallible;
-use std::cmp::Ordering;
 use std::process::Command;
 use std::time::Instant;
 use log::{debug, info, error};
 
+use google_cloud_storage::client::{Client, ClientConfig};
+use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType};
+use google_cloud_storage::http::objects::Object;
+use anyhow::{Result, Context, anyhow};
+
 use std::fs;
 use std::path::{PathBuf, Path};
 use std::env;
+use tokio::fs::File;
+use tokio::io::AsyncReadExt;
+use std::collections::HashMap;
 
 const REEL_ASPECT_RATIO: f32 = 9.0 / 16.0;
 const REEL_WIDTH: u32 = 1080;
@@ -46,76 +51,105 @@ struct CreateSlideshowResponse {
     output_file: String,
 }
 
+async fn upload_video_to_gcs(video_id: &str, output_file: &str) -> Result<()> {
+    let config = ClientConfig::default().with_auth().await.context("Failed to create client config")?;
+    let client = Client::new(config);
+    let bucket_name = "zappush_public";
+    let object_name = format!("videos/{}/full_video.mp4", video_id);
+
+    let mut file = File::open(output_file).await.context("Failed to open file")?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer).await.context("Failed to read file")?;
+
+    let upload_request = UploadObjectRequest {
+        bucket: bucket_name.to_string(),
+        ..Default::default()
+    };
+
+    // Create metadata
+    let mut metadata = HashMap::new();
+    metadata.insert("video_id".to_string(), video_id.to_string());
+
+    // Create the upload type with metadata
+    let upload_type = UploadType::Multipart(Box::new(Object {
+        name: object_name.clone(),
+        content_type: Some("video/mp4".to_string()),
+        metadata: Some(metadata),
+        ..Default::default()
+    }));
+    
+    // Perform the upload
+    client.upload_object(&upload_request, buffer, &upload_type)
+        .await
+        .context("Failed to upload object")?;
+    
+    println!("Uploaded video to GCS: {}", object_name);
+    Ok(())
+}
+
 fn get_video_folder_path(video_id: &str) -> PathBuf {
     let home_dir = env::var("HOME").expect("HOME environment variable not set");
     PathBuf::from(home_dir).join("Desktop").join("reels").join(video_id)
 }
 
-// fn get_video_folder_path(video_id: &str) -> PathBuf {
-//     PathBuf::from(format!("/tmp/{}", video_id))
-// }
+async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Reply, warp::Rejection> {
+    let result: Result<CreateSlideshowResponse, anyhow::Error> = async {
+        println!("Creating slideshow for video ID: {}", req.video_id);
 
-async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Reply, Infallible> {
+        let video_folder = get_video_folder_path(&req.video_id);
+        let subtitles_path = video_folder.join("subtitles/subtitles.json");
+        let audio_file = video_folder.join("audio/full_audio.mp3");
+        let output_file = video_folder.join("output_rust.mp4");
 
-    println!("Creating slideshow for video ID: {}", req.video_id);
+        // Read and parse the subtitles.json file
+        let asr_data: ASRData = serde_json::from_str(&fs::read_to_string(&subtitles_path)
+            .context("Failed to read subtitles.json")?).context("Failed to parse subtitles.json")?;
 
-    let video_folder = get_video_folder_path(&req.video_id);
-    let subtitles_path = video_folder.join("subtitles/subtitles.json");
-    let audio_file = video_folder.join("audio/full_audio.mp3");
-    let output_file = video_folder.join("output_rust.mp4");
+        // Get image paths
+        let image_paths: Vec<PathBuf> = fs::read_dir(video_folder.join("images"))
+            .context("Failed to read images directory")?
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+                if path.is_file() && path.file_name()?.to_str()?.starts_with("image_") {
+                    Some(path)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-    // Read and parse the subtitles.json file
-    let asr_data: ASRData = match fs::read_to_string(&subtitles_path) {
-        Ok(content) => match serde_json::from_str(&content) {
-            Ok(data) => data,
-            Err(e) => {
-                return Ok(warp::reply::json(&CreateSlideshowResponse {
-                    message: format!("Error parsing subtitles.json: {}", e),
-                    output_file: "".to_string(),
-                }))
-            }
-        },
+        println!("ASR data: {:?}", asr_data);
+        println!("Audio file: {}", audio_file.display());
+        println!("Output file: {}", output_file.display());
+
+        create_slideshow_with_subtitles(&image_paths, &asr_data, audio_file.to_str().unwrap(), output_file.to_str().unwrap())
+            .context("Failed to create slideshow")?;
+
+        println!("Slideshow created successfully");
+        upload_video_to_gcs(&req.video_id, output_file.to_str().unwrap())
+            .await
+            .context("Failed to upload video to GCS")?;
+
+        // guess the URL of the uploaded video
+        let url = format!("https://storage.googleapis.com/zappush_public/videos/{}/full_video.mp4", req.video_id);
+        println!("Uploaded video to GCS");
+        
+        Ok(CreateSlideshowResponse {
+            message: "Slideshow created successfully".to_string(),
+            output_file: url,
+        })
+    }.await;
+
+    match result {
+        Ok(response) => Ok(warp::reply::json(&response)),
         Err(e) => {
-            return Ok(warp::reply::json(&CreateSlideshowResponse {
-                message: format!("Error reading subtitles.json: {}", e),
+            let error_message = format!("Error: {}", e);
+            error!("{}", error_message);
+            Ok(warp::reply::json(&CreateSlideshowResponse {
+                message: error_message,
                 output_file: "".to_string(),
             }))
-        }
-    };
-
-    // Get image paths
-    let image_paths: Vec<PathBuf> = fs::read_dir(video_folder.join("images"))
-        .unwrap_or_else(|_| panic!("Failed to read images directory for video ID: {}", req.video_id))
-        .filter_map(|entry| {
-            let entry = entry.unwrap();
-            let path = entry.path();
-            if path.is_file() && path.file_name().unwrap().to_str().unwrap().starts_with("image_") {
-                Some(path)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    println!("ASR data: {:?}", asr_data);
-    println!("Audio file: {}", audio_file.display());
-    println!("Output file: {}", output_file.display());
-
-    match create_slideshow_with_subtitles(&image_paths, &asr_data, &audio_file.to_str().unwrap(), &output_file.to_str().unwrap()) {
-        Ok(_) => {
-            let response = CreateSlideshowResponse {
-                message: "Slideshow created successfully".to_string(),
-                output_file: output_file.to_str().unwrap().to_string(),
-            };
-            Ok(warp::reply::json(&response))
-        },
-        Err(e) => {
-            println!("Error creating slideshow for videoID: {}: {}", req.video_id, e);
-            let error_response = CreateSlideshowResponse {
-                message: format!("Error creating slideshow: {}", e),
-                output_file: "".to_string(),
-            };
-            Ok(warp::reply::json(&error_response))
         }
     }
 }
@@ -125,17 +159,17 @@ fn create_slideshow_with_subtitles(
     asr_data: &ASRData,
     audio_file: &str,
     output_file: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let start_time = Instant::now();
 
     // Ensure the output directory exists
     if let Some(parent) = Path::new(output_file).parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).context("Failed to create output directory")?;
         println!("Created output directory: {:?}", parent);
     }
 
     // Create subtitle file
-    create_subtitle_file(asr_data, "/tmp/subtitles.srt")?;
+    create_subtitle_file(asr_data, "/tmp/subtitles.srt").context("Failed to create subtitle file")?;
     println!("Created subtitle file");
 
     // Sort image paths
@@ -233,15 +267,13 @@ fn create_slideshow_with_subtitles(
     println!("Starting FFmpeg process");
     let output = Command::new("ffmpeg")
         .args(&ffmpeg_args)
-        .output()?;
+        .output()
+        .context("Failed to execute FFmpeg command")?;
 
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
         println!("FFmpeg error: {}", error_msg);
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("FFmpeg error: {}", error_msg),
-        )));
+        return Err(anyhow!("FFmpeg error: {}", error_msg));
     }
 
     let duration = start_time.elapsed();
@@ -250,14 +282,14 @@ fn create_slideshow_with_subtitles(
     Ok(())
 }
 
-fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
     let mut content = String::new();
     for (i, word) in asr_data.words.iter().enumerate() {
         let start = format_time(word.start);
         let end = format_time(word.end);
         content.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, start, end, word.word));
     }
-    fs::write(output_file, content)?;
+    fs::write(output_file, content).context("Failed to write subtitle file")?;
     Ok(())
 }
 
@@ -271,9 +303,10 @@ fn format_time(seconds: f64) -> String {
 
 #[tokio::main]
 async fn main() {
+    std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", "/Users/aditya/Documents/OSS/zappush/shortpro/backend/gcp_credentials.json");
+
     let create_slideshow = warp::post()
         .and(warp::path("create_slideshow"))
-        // .and(warp::body::content_length_limit(1024 * 1024 * 50))
         .and(warp::body::json())
         .and_then(create_slideshow);
 

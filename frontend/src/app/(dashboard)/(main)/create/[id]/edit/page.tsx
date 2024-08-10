@@ -8,16 +8,13 @@ import { siteConfig } from '@/app/siteConfig'
 import { motion } from 'framer-motion'
 import confetti from 'canvas-confetti'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2 } from 'lucide-react'
-import { userInfo } from 'os'
+import { CheckCircle2, Tag, Clock } from 'lucide-react'
 
 const progressSteps = [
   { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
-  { key: 'dallePromptGenerated', label: 'Image magic', slogan: 'Preparing to summon the AI art genies...' },
-  { key: 'dalleGenerated', label: 'Images themselves', slogan: 'Summoning the AI art genies...' },
   { key: 'ttsGenerated', label: 'Fixing Timing', slogan: 'Teaching robots to talk like humans...' },
   { key: 'srtGenerated', label: 'Subtitles', slogan: 'Crafting subtitles for your masterpiece...' },
-  { key: 'videoGenerated', label: 'Video Generated', slogan: 'Bringing your creation to life...' },
+  { key: 'dalleGenerated', label: 'Background generation', slogan: 'Summoning the AI art genies...' },
   { key: 'videoUploaded', label: 'Video Upload', slogan: 'Preparing your masterpiece for its debut...' },
 ]
 
@@ -42,7 +39,10 @@ export default function EditCreate() {
     const [accessToken, setAccessToken] = useState("")
     const [canRecreate, setCanRecreate] = useState(false)
     const [createdAt, setCreatedAt] = useState(null)
+    const [updatedAt, setUpdatedAt] = useState(null)
+    const [confettiShown, setConfettiShown] = useState(false)
     const [completedSteps, setCompletedSteps] = useState({})
+    const [video, setVideo] = useState({})
     const intervalRef = useRef(null)
 
     const handleRetry = () => {
@@ -60,14 +60,12 @@ export default function EditCreate() {
             setError(null)
             setProgress(0)
             setStatus('Restarting the magic! Hang tight...')
-            // setCanRecreate(false)
             setCompletedSteps({})
             toast({
                 title: "Success",
                 description: "Video recreation started. The show must go on!",
             })
 
-            // reload page after 2 seconds
             setTimeout(() => {
                 window.location.reload()
             }, 2000)
@@ -80,6 +78,11 @@ export default function EditCreate() {
                 description: 'Failed to restart the video creation. Our wand needs new batteries!'
             })
         })
+    }
+
+    const formatDate = (dateString) => {
+        const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
+        return new Date(dateString).toLocaleDateString(undefined, options);
     }
 
     const determineProgress = (video) => {
@@ -96,28 +99,32 @@ export default function EditCreate() {
                 completed[step.key] = true
             }
         })
+
         setCompletedSteps(completed)
-    
-        // Use the progress directly from the backend
         setProgress(video.progress)
     
-        if (video.progress === 100) {
+        if (video.progress === 100 && !confettiShown) {
             setStatus('Ta-da! Your video masterpiece is ready!')
             confetti({
                 particleCount: 100,
                 spread: 70,
                 origin: { y: 0.6 }
             })
+
+            setConfettiShown(true)
         } else {
             setStatus(creativeSlogans[Math.floor(Math.random() * creativeSlogans.length)])
         }
     
-        // Check if video can be recreated
-        const creationTime = new Date(video.CreatedAt)
+        // const updatedTime = new Date(video.updated_at);
+        const updatedTime = new Date(video.updated_at.slice(0, -9));
+
         const now = new Date()
-        const hoursSinceCreation = (now - creationTime) / (1000 * 60 * 60)
-        setCanRecreate(hoursSinceCreation > 2 && video.progress < 100)
-        setCreatedAt(video.CreatedAt)
+        const minutesSinceUpdation = (now - updatedTime) / (1000 * 60)
+
+        setCanRecreate(minutesSinceUpdation > 10 && video.progress < 100)
+        setCreatedAt(video.created_at)
+        setUpdatedAt(video.updated_at)
     }
 
     useEffect(() => {
@@ -135,6 +142,7 @@ export default function EditCreate() {
                 return res.json()
             })
             .then(data => {
+                setVideo(data.video)
                 determineProgress(data.video)
             })
             .catch(err => {
@@ -146,7 +154,7 @@ export default function EditCreate() {
                 })
             })
         }
-        fetchProgress() // Initial fetch
+        fetchProgress()
         intervalRef.current = setInterval(fetchProgress, 5000)
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current)
@@ -193,6 +201,14 @@ export default function EditCreate() {
                             className="text-center"
                         >
                             <p className="text-lg mb-4 font-semibold text-blue-600 dark:text-blue-400">{status}</p>
+                            {video.videoStyle && (
+                                <div className="flex justify-center items-center mb-4">
+                                    <Tag className="text-gray-500 mr-2" size={16} />
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {video.videoStyle}
+                                    </span>
+                                </div>
+                            )}
                             <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 mb-4">
                                 <motion.div 
                                     className="bg-blue-600 h-4 rounded-full transition-all duration-500" 
@@ -214,15 +230,24 @@ export default function EditCreate() {
                                 ))}
                             </div>
 
-                            {progress === 100 && (
-                                <motion.p
+                            {progress === 100 && video.video_url && (
+                                <motion.div
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: 0.5 }}
-                                    className="mt-4 text-green-500 font-semibold"
+                                    className="mt-6"
                                 >
-                                    🎉 Bravo! Your video is ready for its debut!
-                                </motion.p>
+                                    <p className="text-green-500 font-semibold mb-4">
+                                        🎉 Bravo! Your video is ready for its debut!
+                                    </p>
+                                    <video
+                                        controls
+                                        className="w-full max-w-2xl mx-auto rounded-lg shadow-lg"
+                                        src={video.video_url}
+                                    >
+                                        Your browser does not support the video tag.
+                                    </video>
+                                </motion.div>
                             )}
                             {canRecreate && (
                                 <motion.div
@@ -240,11 +265,14 @@ export default function EditCreate() {
                                     </Button>
                                 </motion.div>
                             )}
-                            {createdAt && (
-                                <p className="mt-4 text-sm text-gray-500">
-                                    Created at: {new Date(createdAt).toLocaleString()}
-                                </p>
-                            )}
+                            <div className="mt-6 space-y-2 text-sm text-gray-500">
+                                {createdAt && (
+                                    <div className="flex items-center justify-center">
+                                        <Clock className="mr-2" size={16} />
+                                        <span>Created: {formatDate(createdAt)}</span>
+                                    </div>
+                                )}
+                            </div>
                         </motion.div>
                     )}
                 </CardContent>

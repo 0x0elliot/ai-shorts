@@ -5,27 +5,33 @@ import (
 	"io/ioutil"
 	"log"
 
+	models "go-authentication-boilerplate/models"
+
 	"net/http"
 	"bytes"
 	"encoding/json"
 )
 
 type StitchingAPIResponse struct {
-	OutputURL string `json:"output_url"`
+	OutputFile string `json:"output_file"`
 }
 
-func StitchVideo(videoID string) (error) {
+func StitchVideo(videoID string) (models.Video, error) {
 	log.Printf("[INFO] Creating slideshow with subtitles..")
+
+	video := models.Video{}
 
 	outputURL, err := callStitchingAPI(videoID)
 	if err != nil {
-		return fmt.Errorf("failed to call stitching API: %v", err)
+		return video, fmt.Errorf("failed to call stitching API: %v", err)
 	}
 
-	video, err := GetVideoById(videoID)
+	videoPtr, err := GetVideoById(videoID)
 	if err != nil {
-		return fmt.Errorf("failed to get video by ID: %v", err)
+		return video, fmt.Errorf("failed to get video by ID: %v", err)
 	}
+
+	video = *videoPtr
 
 	video.VideoURL = outputURL
 	video.VideoUploaded = true
@@ -37,12 +43,17 @@ func StitchVideo(videoID string) (error) {
 	video.DALLEGenerated = true
 	video.StitchedVideoURL = outputURL
 
-	_, err = SetVideo(video)
+	videoPtr, err = SetVideo(&video)
 	if err != nil {
-		return fmt.Errorf("failed to set video: %v", err)
+		log.Printf("[ERROR] Failed to set video: %v", err)
+		return video, fmt.Errorf("failed to set video: %v", err)
 	}
+
+	log.Printf("[INFO] Successfully created slideshow with subtitles..")
+
+	video = *videoPtr
 	
-	return nil
+	return video, nil
 }
 
 func callStitchingAPI(videoID string) (outputUrl string, err error) {
@@ -97,5 +108,5 @@ func callStitchingAPI(videoID string) (outputUrl string, err error) {
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 
-	return response.OutputURL, nil
+	return response.OutputFile, nil
 }

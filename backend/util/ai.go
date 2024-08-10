@@ -92,19 +92,22 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		video.Error = ""
 		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
 			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
-			if err := StitchVideo(video.ID); err != nil {
+			videoPtr, err := StitchVideo(video.ID);
+			if err != nil {
 				log.Printf("[ERROR] Error stitching video: %v", err)
 				return nil, SaveVideoError(video, err)
-			} else {
-				// Update video progress
-				video.Progress = 100
-				video.VideoStitched = true
+			}
 
-				video, err := SetVideo(video)
-				if err != nil {
-					log.Printf("[ERROR] Error saving video: %v", err)
-					return nil, SaveVideoError(video, err)
-				}
+			video = &videoPtr
+
+			// Update video progress
+			video.Progress = 100
+			video.VideoStitched = true
+
+			video, err := SetVideo(video)
+			if err != nil {
+				log.Printf("[ERROR] Error saving video: %v", err)
+				return nil, SaveVideoError(video, err)
 			}
 		}
 
@@ -124,6 +127,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		video.DALLEGenerated = false
 		video.TTSGenerated = false
 		video.VideoStitched = false
+		video.SRTGenerated = false
 		video.VideoUploaded = false
 		video.Error = ""
 		video.TTSURL = ""
@@ -217,12 +221,13 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Going to try to stitch video now: %s", video.ID)
 
-	if err = StitchVideo(video.ID); err != nil {
+	videoPtr, err := StitchVideo(video.ID)
+	if err != nil {
 		log.Printf("[ERROR] Error stitching video: %v", err)
-
-		video.Progress = 95
 		return nil, SaveVideoError(video, err)
 	}
+
+	video = &videoPtr
 
 	log.Printf("[INFO] Stitched video for video: %s", video.ID)
 

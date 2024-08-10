@@ -10,22 +10,45 @@ import (
 	"encoding/json"
 )
 
+type StitchingAPIResponse struct {
+	OutputURL string `json:"output_url"`
+}
+
 func StitchVideo(videoID string) (error) {
 	log.Printf("[INFO] Creating slideshow with subtitles..")
 
-	err := callStitchingAPI(videoID)
+	outputURL, err := callStitchingAPI(videoID)
 	if err != nil {
 		return fmt.Errorf("failed to call stitching API: %v", err)
 	}
 
+	video, err := GetVideoById(videoID)
+	if err != nil {
+		return fmt.Errorf("failed to get video by ID: %v", err)
+	}
+
+	video.VideoURL = outputURL
+	video.VideoUploaded = true
+	video.VideoStitched = true
+	video.TTSGenerated = true
+	video.SRTGenerated = true
+	video.ScriptGenerated = true
+	video.DALLEPromptGenerated = true
+	video.DALLEGenerated = true
+	video.StitchedVideoURL = outputURL
+
+	_, err = SetVideo(video)
+	if err != nil {
+		return fmt.Errorf("failed to set video: %v", err)
+	}
+	
 	return nil
 }
 
-func callStitchingAPI(videoID string) error {
-	// @app.route('/create_slideshow', methods=['POST'], from localhost:5000
+func callStitchingAPI(videoID string) (outputUrl string, err error) {
 	req, err := http.NewRequest("POST", "http://127.0.0.1:8080/create_slideshow", nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %v", err)
+		return "", fmt.Errorf("failed to create request: %v", err)
 	}
 
 	type SlideshowRequest struct {
@@ -40,7 +63,7 @@ func callStitchingAPI(videoID string) error {
 	// Marshal the request body
 	body, err := json.Marshal(slideshowRequest)
 	if err != nil {
-		return fmt.Errorf("failed to marshal request body: %v", err)
+		return "", fmt.Errorf("failed to marshal request body: %v", err)
 	}
 
 	// Set the request body
@@ -56,14 +79,23 @@ func callStitchingAPI(videoID string) error {
 	res, err := client.Do(req)
 	if err != nil {
 		log.Printf("[ERROR] Failed to create slideshow with subtitles. The response body is: %v with status code: %v", res.Body, res.StatusCode)
-		return fmt.Errorf("failed to send request: %v", err)
+		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 
 	if res.StatusCode != http.StatusOK {
 		log.Printf("[ERROR] Failed to create slideshow with subtitles. The response body is: %v with status code: %v", res.Body, res.StatusCode)
-
-		return fmt.Errorf("failed to send request: %v", err)
+		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 
-	return nil // for now
+	log.Printf("[INFO] Successfully created slideshow with subtitles..")
+
+	// Decode the response
+	var response StitchingAPIResponse
+
+	err = json.NewDecoder(res.Body).Decode(&response)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode response: %v", err)
+	}
+
+	return response.OutputURL, nil
 }

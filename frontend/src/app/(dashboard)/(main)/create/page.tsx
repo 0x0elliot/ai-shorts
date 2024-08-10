@@ -21,6 +21,7 @@ export default function Create() {
     const [description, setDescription] = useState('')
     const [voice, setVoice] = useState('onyx') // Edward as default
     const [videoStyle, setVideoStyle] = useState('default')
+    const [videoTheme, setVideoTheme] = useState('')
     const [postingMethod, setPostingMethod] = useState(['email']) // Email me as default
     const [isOneTime, setIsOneTime] = useState(true) // One time video on by default
     const [selectedStyle, setSelectedStyle] = useState('default')
@@ -91,6 +92,7 @@ export default function Create() {
             description: description,
             narrator: voice.toLowerCase(),
             videoStyle: videoStyle.toLowerCase(),
+            videoTheme: videoTheme,
             postingMethod: postingMethod,
             isOneTime: isOneTime,
         }

@@ -4,6 +4,8 @@ import (
 	db "go-authentication-boilerplate/database"
 	models "go-authentication-boilerplate/models"
 	"log"
+
+	"gorm.io/gorm"
 )
 
 func GetUserById(id string) (*models.User, error) {
@@ -14,6 +16,28 @@ func GetUserById(id string) (*models.User, error) {
 		return nil, txn.Error
 	}
 	return user, nil
+}
+
+func GetVideosByOwner(ownerID string, newestFirst bool) ([]models.Video, error) {
+	videos := []models.Video{}
+
+	var txn *gorm.DB
+
+	if newestFirst {
+		txn = db.DB.Where("owner_id = ?", ownerID).Preload("Owner").Order("created_at desc").Find(&videos)
+	} else {
+		txn = db.DB.Where("owner_id = ?", ownerID).Preload("Owner").Order("created_at asc").Find(&videos)
+	}
+
+	if txn.Error != nil {
+		if txn.Error.Error() == "record not found" {
+			return videos, nil
+		}
+
+		log.Printf("[ERROR] Error getting videos: %v", txn.Error)
+		return nil, txn.Error
+	}
+	return videos, nil
 }
 
 func GetVideoById(id string) (*models.Video, error) {

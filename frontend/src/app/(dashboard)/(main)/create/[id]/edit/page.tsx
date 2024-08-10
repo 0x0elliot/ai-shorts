@@ -8,6 +8,29 @@ import { siteConfig } from '@/app/siteConfig'
 import { motion } from 'framer-motion'
 import confetti from 'canvas-confetti'
 import { Button } from '@/components/ui/button'
+import { CheckCircle2 } from 'lucide-react'
+import { userInfo } from 'os'
+
+const progressSteps = [
+  { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
+  { key: 'dallePromptGenerated', label: 'Image magic', slogan: 'Preparing to summon the AI art genies...' },
+  { key: 'dalleGenerated', label: 'Images themselves', slogan: 'Summoning the AI art genies...' },
+  { key: 'ttsGenerated', label: 'Fixing Timing', slogan: 'Teaching robots to talk like humans...' },
+  { key: 'srtGenerated', label: 'Subtitles', slogan: 'Crafting subtitles for your masterpiece...' },
+  { key: 'videoGenerated', label: 'Video Generated', slogan: 'Bringing your creation to life...' },
+  { key: 'videoUploaded', label: 'Video Upload', slogan: 'Preparing your masterpiece for its debut...' },
+]
+
+const creativeSlogans = [
+  "Lights, camera, AI-ction!",
+  "Cooking up a visual feast...",
+  "Sprinkling digital stardust...",
+  "Painting with pixels and dreams...",
+  "Turning 1s and 0s into pure magic...",
+  "Mixing imagination and algorithms...",
+  "Crafting tomorrow's memories today...",
+  "Weaving a tapestry of digital wonder...",
+]
 
 export default function EditCreate() {
     const { toast } = useToast()
@@ -17,6 +40,9 @@ export default function EditCreate() {
     const [error, setError] = useState(null)
     const [status, setStatus] = useState('Brewing your video magic...')
     const [accessToken, setAccessToken] = useState("")
+    const [canRecreate, setCanRecreate] = useState(false)
+    const [createdAt, setCreatedAt] = useState(null)
+    const [completedSteps, setCompletedSteps] = useState({})
     const intervalRef = useRef(null)
 
     const handleRetry = () => {
@@ -34,6 +60,8 @@ export default function EditCreate() {
             setError(null)
             setProgress(0)
             setStatus('Restarting the magic! Hang tight...')
+            // setCanRecreate(false)
+            setCompletedSteps({})
             toast({
                 title: "Success",
                 description: "Video recreation started. The show must go on!",
@@ -61,20 +89,35 @@ export default function EditCreate() {
             setStatus('Oops! Our magic wand misfired!')
             return
         }
-        if (video.videoUploaded) {
-            setProgress(100)
+    
+        const completed = {}
+        progressSteps.forEach(step => {
+            if (video[step.key]) {
+                completed[step.key] = true
+            }
+        })
+        setCompletedSteps(completed)
+    
+        // Use the progress directly from the backend
+        setProgress(video.progress)
+    
+        if (video.progress === 100) {
             setStatus('Ta-da! Your video masterpiece is ready!')
             confetti({
                 particleCount: 100,
                 spread: 70,
                 origin: { y: 0.6 }
             })
-        } else if (video.dalleGenerated) { setProgress(60); setStatus('Summoning the AI art genies...') }
-        else if (video.srtGenerated) { setProgress(40); setStatus('Crafting subtitles for your masterpiece...') }
-        else if (video.ttsGenerated) { setProgress(30); setStatus('Teaching robots to talk like humans...') }
-        else if (video.dallePromptGenerated) { setProgress(45); setStatus('Preparing to summon the AI art genies...') }
-        else if (video.scriptGenerated) { setProgress(10); setStatus('Crafting a blockbuster script...') }
-        else { setProgress(0); setStatus('Warming up our creative engines...') }
+        } else {
+            setStatus(creativeSlogans[Math.floor(Math.random() * creativeSlogans.length)])
+        }
+    
+        // Check if video can be recreated
+        const creationTime = new Date(video.CreatedAt)
+        const now = new Date()
+        const hoursSinceCreation = (now - creationTime) / (1000 * 60 * 60)
+        setCanRecreate(hoursSinceCreation > 2 && video.progress < 100)
+        setCreatedAt(video.CreatedAt)
     }
 
     useEffect(() => {
@@ -158,7 +201,19 @@ export default function EditCreate() {
                                     animate={{ width: `${progress}%` }}
                                 />
                             </div>
-                            <p className="text-2xl font-bold text-gray-800 dark:text-gray-200">{progress}% Complete</p>
+                            <p className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6">{progress}% Complete</p>
+                            
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                                {progressSteps.map((step, index) => (
+                                    <div key={index} className="flex flex-col items-center">
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center ${completedSteps[step.key] ? 'bg-green-500' : 'bg-gray-300'}`}>
+                                            {completedSteps[step.key] ? <CheckCircle2 className="text-white" /> : (index + 1)}
+                                        </div>
+                                        <p className="mt-2 text-sm">{step.label}</p>
+                                    </div>
+                                ))}
+                            </div>
+
                             {progress === 100 && (
                                 <motion.p
                                     initial={{ opacity: 0, y: 20 }}
@@ -168,6 +223,27 @@ export default function EditCreate() {
                                 >
                                     🎉 Bravo! Your video is ready for its debut!
                                 </motion.p>
+                            )}
+                            {canRecreate && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: 0.5 }}
+                                    className="mt-6"
+                                >
+                                    <p className="text-yellow-500 mb-2">Looks like our magic is taking a bit long. Want to try again?</p>
+                                    <Button 
+                                        onClick={handleRetry}
+                                        className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
+                                    >
+                                        🔄 Recreate Video
+                                    </Button>
+                                </motion.div>
+                            )}
+                            {createdAt && (
+                                <p className="mt-4 text-sm text-gray-500">
+                                    Created at: {new Date(createdAt).toLocaleString()}
+                                </p>
                             )}
                         </motion.div>
                     )}

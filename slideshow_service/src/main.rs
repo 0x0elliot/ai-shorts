@@ -7,6 +7,7 @@ use log::{debug, info, error};
 use google_cloud_storage::client::{Client, ClientConfig};
 use google_cloud_storage::http::objects::upload::{UploadObjectRequest, UploadType};
 use google_cloud_storage::http::objects::Object;
+use google_cloud_storage::http::object_access_controls::PredefinedObjectAcl;
 use anyhow::{Result, Context, anyhow};
 
 use std::fs;
@@ -63,6 +64,7 @@ async fn upload_video_to_gcs(video_id: &str, output_file: &str) -> Result<()> {
 
     let upload_request = UploadObjectRequest {
         bucket: bucket_name.to_string(),
+        predefined_acl: Some(PredefinedObjectAcl::PublicRead),
         ..Default::default()
     };
 

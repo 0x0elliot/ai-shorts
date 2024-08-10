@@ -15,6 +15,7 @@ type Video struct {
 	IsOneTime     bool           `json:"isOneTime"`
 	VideoURL      string         `json:"videoURL" gorm:"null"`
 	Script        string         `json:"script" gorm:"null"`
+	VideoTheme    string         `json:"videoTheme"`
 
 	ScriptGenerated      bool `json:"scriptGenerated" gorm:"default:false"`
 	DALLEPromptGenerated bool `json:"dallePromptGenerated" gorm:"default:false"`
@@ -22,12 +23,10 @@ type Video struct {
 	TTSGenerated         bool `json:"ttsGenerated" gorm:"default:false"`
 	SRTGenerated         bool `json:"srtGenerated" gorm:"default:false"`
 	VideoStitched        bool `json:"videoStitched" gorm:"default:false"`
+	// full progress of the video
+	VideoUploaded  bool `json:"videoUploaded" gorm:"default:false"`
 
 	Progress int `json:"progress" gorm:"default:0"`
-
-	// full progress of the video
-	VideoGenerated bool `json:"videoGenerated" gorm:"default:false"`
-	VideoUploaded  bool `json:"videoUploaded" gorm:"default:false"`
 
 	// maybe, hide this from the user
 	Error string `json:"error" gorm:"null"`

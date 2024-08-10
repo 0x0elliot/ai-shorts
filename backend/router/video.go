@@ -14,9 +14,35 @@ func SetupVideoRoutes() {
 	privVideo := VIDEO.Group("/private")
 	privVideo.Use(auth.SecureAuth()) // middleware to secure all routes for this group
 
+	privVideo.Get("/list", ListVideos)
 	privVideo.Get("/:id", GetVideo)
 	privVideo.Post("/create", CreateSchedule)
 	privVideo.Post("/recreate/:id", RecreateVideo)
+}
+
+func ListVideos(c *fiber.Ctx) error {
+	userId := c.Locals("id").(string)
+
+	newestFirstQuery := c.Query("newestFirst")
+	newestFirst := true
+
+	if newestFirstQuery == "false" {
+		newestFirst = false
+	}
+
+	videos, err := util.GetVideosByOwner(userId, newestFirst)
+	if err != nil {
+		log.Printf("[ERROR] Error getting videos: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": true,
+			"message": "Error getting videos",
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"error": false,
+		"videos": videos,
+	})
 }
 
 func GetVideo(c *fiber.Ctx) error {
@@ -63,12 +89,13 @@ func RecreateVideo(c *fiber.Ctx) error {
 		})
 	}
 
-	if !(len(video.Error) > 0) {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": true,
-			"message": "Video is not in error state",
-		})
-	}
+	// paying customers have full authority
+	// if !(len(video.Error) > 0) {
+	// 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+	// 		"error": true,
+	// 		"message": "Video is not in error state",
+	// 	})
+	// }
 
 	go util.CreateVideo(video, true)
 
@@ -87,6 +114,7 @@ func CreateSchedule(c *fiber.Ctx) error {
 		VideoStyle string `json:"videoStyle"`
 		PostingMethod []string `json:"postingMethod"`
 		IsOneTime bool `json:"isOneTime"`
+		VideoTheme string `json:"videoTheme"`
 	}
 
 	var req CreateScheduleRequest
@@ -135,6 +163,7 @@ func CreateSchedule(c *fiber.Ctx) error {
 		IsOneTime: req.IsOneTime,
 		OwnerID: user.ID,
 		Owner: *user,
+		VideoTheme: req.VideoTheme,
 	}
 
 	video, err := util.SetVideo(videoData)

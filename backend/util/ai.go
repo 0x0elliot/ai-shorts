@@ -89,7 +89,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	client := openai.NewClient(OPENAI_API_KEY)
 
 	if recreate {
-
+		video.Error = ""
 		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
 			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
 			if err := StitchVideo(video.ID); err != nil {
@@ -124,7 +124,6 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		video.DALLEGenerated = false
 		video.TTSGenerated = false
 		video.VideoStitched = false
-		video.VideoGenerated = false
 		video.VideoUploaded = false
 		video.Error = ""
 		video.TTSURL = ""
@@ -221,7 +220,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	if err = StitchVideo(video.ID); err != nil {
 		log.Printf("[ERROR] Error stitching video: %v", err)
 
-		video.Progress = 90
+		video.Progress = 95
 		return nil, SaveVideoError(video, err)
 	}
 
@@ -241,7 +240,6 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	log.Printf("[INFO] Video processing completed in %v", endTime.Sub(startTime))
 
 	return video, nil
-
 }
 
 func generateTTSForScript(client *openai.Client, video *models.Video) error {
@@ -442,7 +440,14 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 		return fmt.Errorf("error creating images folder: %v", err)
 	}
 
-	retryDelays := []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second}
+	// retryDelays := []time.Duration{5 * time.Second, 10 * time.Second, 15 * time.Second}
+	retryDelays := []time.Duration{
+		5 * time.Second,
+	}
+
+	for i := 1; i <= 30; i++ {
+		retryDelays = append(retryDelays, time.Duration(i*10)*time.Second)
+	}
 
 	for i, sentence := range sentences {
 		wg.Add(1)
@@ -457,9 +462,15 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 			var imageData []byte
 			var err error
 
+			lastSentence := ""
+
+			if len(sentences) > 1 {
+				lastSentence = sentences[len(sentences)-1]
+			}
+
 			// Retry loop for prompt generation
 			for retryCount := 0; retryCount <= len(retryDelays); retryCount++ {
-				prompt, err = generateDallEPromptForSentence(client, s, video)
+				prompt, err = generateDallEPromptForSentence(client, s, video, lastSentence)
 				if err == nil {
 					break
 				}
@@ -514,9 +525,9 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 	return nil
 }
 
-func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, video *models.Video) (string, error) {
+func generateDallEPromptForSentence(client *openai.Client, formattedSentence string, video *models.Video, lastSentence string) (string, error) {
 	if isDevMode() {
-		return generateDallEPromptForSentenceGemini(formattedSentence, video)
+		return generateDallEPromptForSentenceGemini(formattedSentence, video, lastSentence)
 	}
 
 	functionDescription := openai.FunctionDefinition{
@@ -605,7 +616,7 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 	return result.Prompt, nil
 }
 
-func generateDallEPromptForSentenceGemini(formattedSentence string, video *models.Video) (string, error) {
+func generateDallEPromptForSentenceGemini(formattedSentence string, video *models.Video, lastSentence string) (string, error) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
@@ -618,9 +629,13 @@ func generateDallEPromptForSentenceGemini(formattedSentence string, video *model
 	styleInstruction := getStyleInstruction(video.VideoStyle)
 
 	prompt := fmt.Sprintf(`Generate a detailed SDXL prompt based on the following information:
+
+Focus on the sentence, last sentence, topic and theme given by the user.
+
 Sentence: %s
 Topic: %s
-Description: %s
+Last sentence (Please use this information to create a coherent narrative): %s
+
 Style Instruction: %s
 Guidelines for crafting the prompt:
 
@@ -642,7 +657,7 @@ Specify the desired level of detail or realism (e.g. "photorealistic", "impressi
 Avoid unnecessary formatting or markdown. Present the prompt as plain text.
 Keep the prompt concise but descriptive, aiming for 2-3 sentences maximum.
 Focus on creating a cohesive, visually striking image that captures the essence of the sentence and context.
-`, formattedSentence, video.Topic, video.Description, styleInstruction)
+`, formattedSentence, video.Topic, lastSentence, styleInstruction)
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
@@ -787,13 +802,20 @@ Do not include hashtags, links, emojis, or any guidance on how to shoot the vide
 
 	jsonResponse := resp.Candidates[0].Content.Parts[0].(genai.Text)
 
+
+	// jsonResponse := fmt.Sprintf(`{
+	// 	"cleaned_topic": "%s",
+	// 	"script": "%s"
+	// }`, topic, description)
+
+
 	jsonResponseStr := string(jsonResponse)
 	jsonResponseStr = strings.ToLower(jsonResponseStr)
 	jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```json", "")
 	jsonResponseStr = strings.ReplaceAll(jsonResponseStr, "```", "")
 	jsonResponseFinal := strings.ReplaceAll(jsonResponseStr, "\n", "")
 
-	log.Printf("jsonResponse: %s", jsonResponse)
+// 	log.Printf("jsonResponse: %s", jsonResponse)
 
 	var result struct {
 		CleanedTopic string `json:"cleaned_topic"`

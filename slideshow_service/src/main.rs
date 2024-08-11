@@ -121,11 +121,7 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
             })
             .collect();
 
-        println!("ASR data: {:?}", asr_data);
-        println!("Audio file: {}", audio_file.display());
-        println!("Output file: {}", output_file.display());
-
-        create_slideshow_with_subtitles(&image_paths, &asr_data, audio_file.to_str().unwrap(), output_file.to_str().unwrap())
+        create_slideshow_with_subtitles(&image_paths, &asr_data, audio_file.to_str().unwrap(), output_file.to_str().unwrap(), &req.video_id)
             .context("Failed to create slideshow")?;
 
         println!("Slideshow created successfully");
@@ -161,18 +157,21 @@ fn create_slideshow_with_subtitles(
     asr_data: &ASRData,
     audio_file: &str,
     output_file: &str,
+    video_id: &str
 ) -> Result<()> {
     let start_time = Instant::now();
 
     // Ensure the output directory exists
     if let Some(parent) = Path::new(output_file).parent() {
-        fs::create_dir_all(parent).context("Failed to create output directory")?;
+        std::fs::create_dir_all(parent).context("Failed to create output directory")?;
         println!("Created output directory: {:?}", parent);
     }
 
-    // Create subtitle file
-    create_subtitle_file(asr_data, "/tmp/subtitles.srt").context("Failed to create subtitle file")?;
-    println!("Created subtitle file");
+    let srt_file = format!("/tmp/{}.srt", video_id);
+
+    // Create SRT subtitle file
+    create_subtitle_file(asr_data, &srt_file).context("Failed to create SRT subtitle file")?;
+    println!("Created SRT subtitle file for {}", video_id);
 
     // Sort image paths
     let mut sorted_image_paths = image_paths.to_vec();
@@ -227,25 +226,10 @@ fn create_slideshow_with_subtitles(
     // Combine video and audio
     filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
 
-    // Add word highlighting
-    let mut word_filter = String::new();
-    for word in asr_data.words.iter() {
-        let text = word.word.replace("'", "'\\\\\\''").replace(":", "\\:"); // Escape single quotes and colons
-        word_filter.push_str(&format!(
-            "drawtext=fontfile=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf:fontsize=120:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-tw)/2:y=(h-th)/2:text='{}':enable='between(t,{},{})':alpha='if(between(t,{},{}),1,0)',",
-            text, word.start, word.end, word.start, word.end
-        ));
-        
-        // Highlight the current word
-        word_filter.push_str(&format!(
-            "drawtext=fontfile=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf:fontsize=120:fontcolor=yellow:box=1:boxcolor=black@0.5:boxborderw=10:x=(w-tw)/2:y=(h-th)/2:text='{}':enable='between(t,{},{})':alpha='if(between(t,{},{}),1,0)',",
-            text, word.start, word.end, word.start, word.end
-        ));
-    }
-    
-    // Remove trailing comma and add to filter complex
-    word_filter.pop();
-    filter_complex.push_str(&format!("[outv_a]{}[output]", word_filter));
+    filter_complex.push_str(&format!(
+        "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=4,BackColour=&H80000000,Outline=1,OutlineColour=&H000000,Shadow=0,MarginV=25,Fontname=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf,Fontsize=24,PrimaryColour=&H00FFFF&'[output]", 
+        srt_file
+    ));
 
     ffmpeg_args.extend(vec!["-filter_complex".to_string(), filter_complex]);
 
@@ -263,16 +247,16 @@ fn create_slideshow_with_subtitles(
     // Add output file
     ffmpeg_args.push(output_file.to_string());
 
-    println!("FFmpeg command: ffmpeg {}", ffmpeg_args.join(" "));
-
     // Run FFmpeg command
-    println!("Starting FFmpeg process");
-    let output = Command::new("ffmpeg")
+    println!("Starting FFmpeg process for video_id: {}", video_id);
+    let output = std::process::Command::new("ffmpeg")
         .args(&ffmpeg_args)
         .output()
         .context("Failed to execute FFmpeg command")?;
 
     if !output.status.success() {
+        println!("FFmpeg command failed for command: {}", ffmpeg_args.join(" "));
+
         let error_msg = String::from_utf8_lossy(&output.stderr);
         println!("FFmpeg error: {}", error_msg);
         return Err(anyhow!("FFmpeg error: {}", error_msg));
@@ -283,6 +267,7 @@ fn create_slideshow_with_subtitles(
 
     Ok(())
 }
+
 
 fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
     let mut content = String::new();

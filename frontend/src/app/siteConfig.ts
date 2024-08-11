@@ -8,6 +8,7 @@ export const siteConfig = {
     home: "/",
     dashboard: "/dashboard",
     create  : "/create",
+    billing: "/billing",
   },
   externalLink: {
     blocks: "https://blocks.tremor.so/templates#dashboard",

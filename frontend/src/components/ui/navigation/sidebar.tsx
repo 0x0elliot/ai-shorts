@@ -2,6 +2,7 @@
 import { siteConfig } from "@/app/siteConfig"
 import { cx, focusRing } from "@/lib/utils"
 import {
+  RiBillFill,
   RiHome2Line,
   RiLinkM,
   RiSparkling2Fill
@@ -18,6 +19,11 @@ import { UserProfileDesktop, UserProfileMobile } from "./UserProfile"
 const navigation = [
   { name: "Dashboard", href: siteConfig.baseLinks.dashboard, icon: RiHome2Line },
   { name: "Create", href: siteConfig.baseLinks.create, icon:  RiSparkling2Fill },
+  {
+    name: 'Billing',
+    href: siteConfig.baseLinks.billing,
+    icon: RiBillFill,
+  },
   {
     name: "Discord",
     href: "https://discord.gg/y6yPVWjdD9",

@@ -11,6 +11,7 @@ import {
 } from "@/components/Drawer"
 import { cx, focusRing } from "@/lib/utils"
 import {
+  RiBillFill,
   RiHome2Line,
   RiLinkM,
   RiMenuLine,
@@ -25,6 +26,11 @@ const navigation = [
     name: "Create",
     href: "/create",
     icons: RiQuillPenFill,
+  },
+  {
+    name: 'Billing',
+    href: siteConfig.baseLinks.billing,
+    icon: RiBillFill,
   },
   {
     name: "Discord",

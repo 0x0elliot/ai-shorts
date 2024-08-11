@@ -14,12 +14,54 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
+import { useToast } from "@/components/ui/use-toast";
 
 export default function Dashboard() {
+  const { toast } = useToast();
+
   const [userinfo, setUserinfo] = useState({});
   const [videoHistory, setVideoHistory] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 6;
+
+  const handleDownload = async (video: any) => {
+    console.log(video);
+
+    if (video.videoURL) {
+        try {
+            const response = await fetch(video.videoURL, 
+                {
+                    headers: {
+                        'Access-Control-Allow-Origin': '*',
+                        'Content-Type': 'application/octet-stream',
+                    },
+                }
+            );
+
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `video_${video.id}.mp4`;
+            document.body.appendChild(link);
+            link.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(link);
+            
+            toast({
+                title: "Download Started",
+                description: "Your video is downloading. Check your downloads folder!",
+            })
+        } catch (error) {
+            console.error('Download failed:', error);
+            toast({
+                variant: 'destructive',
+                title: "Download Failed",
+                description: "There was an error downloading your video. Please try again.",
+            })
+        }
+    }
+}
 
   useEffect(() => {
     const fetchData = async () => {
@@ -87,8 +129,14 @@ export default function Dashboard() {
             </CardContent>
             <CardFooter>
               <Button onClick={() => window.location.href = `/create/${video.id}/edit`}>
-                Edit Video
+                See Video
               </Button>
+
+              {video.progress === 100 && (
+                <Button onClick={() => handleDownload(video) } variant="secondary" className="ml-2">
+                  Download
+                </Button>
+              )}
             </CardFooter>
           </Card>
         ))}

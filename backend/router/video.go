@@ -63,6 +63,10 @@ func GetVideo(c *fiber.Ctx) error {
 		})
 	}
 
+	if video.Error != "" {
+		video.Error = "An error happened in a step. Try creating the video again"
+	}
+
 	return c.Status(fiber.StatusOK).JSON(fiber.Map{
 		"error": false,
 		"video": video,

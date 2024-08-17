@@ -8,18 +8,17 @@ replace go-authentication-boilerplate => ./
 
 require (
 	cloud.google.com/go/storage v1.43.0
+	github.com/anthropics/anthropic-sdk-go v0.1.0-alpha.1
 	github.com/asaskevich/govalidator v0.0.0-20200907205600-7a23bdc65eef
 	github.com/bold-commerce/go-shopify/v4 v4.5.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/gofiber/fiber/v2 v2.1.1
-	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
 	github.com/google/generative-ai-go v0.17.0
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.3.0
 	github.com/lib/pq v1.3.0
 	github.com/resend/resend-go/v2 v2.9.0
 	github.com/sashabaranov/go-openai v1.27.1
-	gocv.io/x/gocv v0.37.0
 	google.golang.org/api v0.189.0
 	gorm.io/driver/postgres v1.0.5
 	gorm.io/gorm v1.20.5
@@ -56,6 +55,10 @@ require (
 	github.com/klauspost/compress v1.16.7 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/shopspring/decimal v0.0.0-20200227202807-02e2044944cc // indirect
+	github.com/tidwall/gjson v1.14.4 // indirect
+	github.com/tidwall/match v1.1.1 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.16.0 // indirect
 	github.com/valyala/tcplisten v0.0.0-20161114210144-ceec8f93295a // indirect
@@ -66,7 +69,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.26.0 // indirect
 	go.opentelemetry.io/otel/trace v1.26.0 // indirect
 	golang.org/x/crypto v0.25.0 // indirect
-	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.27.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect

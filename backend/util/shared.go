@@ -8,8 +8,8 @@ import (
 )
 
 type ASRSentences struct {
-	// End int `json:"end"`
-	// Start int `json:"start"`
+	End float64 `json:"end"`
+	Start float64 `json:"start"`
 	Text string `json:"text"`
 }
 
@@ -17,8 +17,21 @@ type ASR struct {
 	Sentences []ASRSentences `json:"sentences"`
 }
 
+type PexelsVideo struct {
+	Duration   int `json:"duration"`
+	VideoFiles []struct {
+		Link     string `json:"link"`
+		Quality  string `json:"quality"`
+		FileType string `json:"file_type"`
+	} `json:"video_files"`
+}
+
+type PexelsResponse struct {
+	Videos []PexelsVideo `json:"videos"`
+}
+
 func isDevMode() bool {
-return os.Getenv("USE_GEMINI") == "true"
+	return os.Getenv("USE_GEMINI") == "true"
 }
 
 func StripEmoji(s string) string {

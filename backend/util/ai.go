@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,6 +19,9 @@ import (
 	"mime/multipart"
 
 	models "go-authentication-boilerplate/models"
+
+	"github.com/anthropics/anthropic-sdk-go"
+	anthropicOpts "github.com/anthropics/anthropic-sdk-go/option"
 
 	openai "github.com/sashabaranov/go-openai"
 	"github.com/google/generative-ai-go/genai"
@@ -143,7 +147,8 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Processing content for video: %s", video.ID)
 
-	cleanedTopic, script, err := processContent(client, video.Topic, video.Description)
+	// cleanedTopic, script, essence, err := processContent(client, video.Topic, video.Description)
+	cleanedTopic, script, essence, err := GenerateScriptClaude(video.Topic, video.Description)
 	if err != nil {
 		log.Printf("[ERROR] Error processing content: %v", err)
 		return nil, SaveVideoError(video, err)
@@ -153,6 +158,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	video.Topic = cleanedTopic
 	video.Script = script
+	video.Essence = essence
 	video.ScriptGenerated = true
 	video.Progress = 10
 
@@ -182,7 +188,8 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Generating SRT for video: %s", video.ID)
 
-	if err := generateSRTForTTSTranscript(video); err != nil {
+	asrSentences, err := generateSRTForTTSTranscript(video)
+	if err != nil {
 		log.Printf("[ERROR] Error generating SRT: %v", err)
 		return nil, SaveVideoError(video, err)
 	}
@@ -199,25 +206,58 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		return nil, SaveVideoError(video, err)
 	}
 
-	log.Printf("[INFO] Generating images (after generating prompt for each sentence) for video: %s", video.ID)
+	forceAI := false
 
-	err = generateAndSaveImagesForScript(client, video)
-	if err != nil {
-		log.Printf("[ERROR] Error generating images: %v", err)
-		return nil, SaveVideoError(video, err)
+	if video.MediaType == "stock" {
+		pexelsVideos, err := fetchPexelsVideos(*video, asrSentences)
+		if err != nil {
+			log.Printf("[ERROR] Error fetching Pexels videos: %v", err)
+			forceAI = true
+		} else {
+			log.Printf("[INFO] Fetched %d Pexels videos", len(pexelsVideos))
+
+			selectedVideos, err := matchVideosToSentences(pexelsVideos, asrSentences)
+			if err != nil {
+				log.Printf("[ERROR] Error matching videos to sentences: %v", err)
+				forceAI = true
+			} else {
+				log.Printf("[INFO] Matched %d videos to sentences", len(selectedVideos))
+
+				// one must try to download these as well soon. 
+				// too tired to try.
+
+				video.MediaType = "stock"
+				video.Progress = 60
+				video, err = SetVideo(video)
+				if err != nil {
+					log.Printf("[ERROR] Error saving video: %v", err)
+					return nil, SaveVideoError(video, err)
+				}
+			}
+		}
+	} 
+
+	if forceAI || video.MediaType == "ai" {
+		log.Printf("[INFO] Generating images (after generating prompt for each sentence) for video: %s", video.ID)
+
+		err = generateAndSaveImagesForScript(client, video)
+		if err != nil {
+			log.Printf("[ERROR] Error generating images: %v", err)
+			return nil, SaveVideoError(video, err)
+		}
+
+		video.Progress = 80
+		video.DALLEGenerated = true
+		video.DALLEPromptGenerated = true
+
+		video, err = SetVideo(video)
+		if err != nil {
+			log.Printf("[ERROR] Error saving video: %v", err)
+			return nil, SaveVideoError(video, err)
+		}
+
+		log.Printf("[INFO] Generated images for video: %s", video.ID)
 	}
-
-	video.Progress = 80
-	video.DALLEGenerated = true
-	video.DALLEPromptGenerated = true
-
-	video, err = SetVideo(video)
-	if err != nil {
-		log.Printf("[ERROR] Error saving video: %v", err)
-		return nil, SaveVideoError(video, err)
-	}
-
-	log.Printf("[INFO] Generated images for video: %s", video.ID)
 
 	log.Printf("[INFO] Going to try to stitch video now: %s", video.ID)
 
@@ -245,6 +285,69 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 	log.Printf("[INFO] Video processing completed in %v", endTime.Sub(startTime))
 
 	return video, nil
+}
+
+func fetchPexelsVideos(video models.Video, asrSentences []ASRSentences) ([]PexelsVideo, error) {
+	httpClient := &http.Client{}
+	req, err := http.NewRequest("GET", "https://api.pexels.com/videos/search", nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+
+	req.Header.Set("Authorization", os.Getenv("PEXELS_API_KEY"))
+	req.Header.Set("Accept", "application/json")
+
+	query := url.Values{}
+	query.Add("query", video.Essence)
+	query.Add("per_page", fmt.Sprintf("%d", len(asrSentences)*2)) // Fetch more videos than sentences for better matching
+	req.URL.RawQuery = query.Encode()
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error sending request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("error reading response body: %v", err)
+	}
+
+	var pexelsResponse PexelsResponse
+	err = json.Unmarshal(body, &pexelsResponse)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshalling response: %v", err)
+	}
+
+	return pexelsResponse.Videos, nil
+}
+
+func matchVideosToSentences(videos []PexelsVideo, sentences []ASRSentences) ([]PexelsVideo, error) {
+	if len(videos) == 0 {
+		return nil, fmt.Errorf("no videos fetched from Pexels")
+	}
+
+	// Calculate total duration of all sentences
+	totalSentenceDuration := sentences[len(sentences)-1].End - sentences[0].Start
+
+	// Sort videos by duration, closest to total sentence duration first
+	// sort.Slice(videos, func(i, j int) bool {
+	// 	return math.Abs(float64(videos[i].Duration*1000-totalSentenceDuration)) <
+	// 		math.Abs(float64(videos[j].Duration*1000-totalSentenceDuration))
+	// })
+
+	// Select videos that cover the total duration
+	var selectedVideos []PexelsVideo
+	currentDuration := float64(0)
+	for _, video := range videos {
+		if currentDuration >= totalSentenceDuration {
+			break
+		}
+		selectedVideos = append(selectedVideos, video)
+		currentDuration += float64(video.Duration) * float64(1000) // Convert to milliseconds
+	}
+
+	return selectedVideos, nil
 }
 
 func generateTTSForScript(client *openai.Client, video *models.Video) error {
@@ -295,21 +398,37 @@ func generateTTSForFullScript(client *openai.Client, script, narrator string) ([
 	return io.ReadAll(resp)
 }
 
-func generateSRTForTTSTranscript(video *models.Video) error {
+func generateSRTForTTSTranscript(video *models.Video) ([]ASRSentences, error) {
 	audioFilePath := filepath.Join(getVideoFolderPath(video.ID), "audio", "full_audio.mp3")
+
+	asrSentences := []ASRSentences{}
 
 	srtContent, err := generateSRTWithWhisper(audioFilePath)
 	if err != nil {
-		return fmt.Errorf("error generating SRT with Whisper: %v", err)
+		return asrSentences, fmt.Errorf("error generating SRT with Whisper: %v", err)
 	}
 
 	srtFolderPath := filepath.Join(getVideoFolderPath(video.ID), "subtitles")
 	if err := os.MkdirAll(srtFolderPath, 0755); err != nil {
-		return fmt.Errorf("error creating subtitles folder: %v", err)
+		return asrSentences, fmt.Errorf("error creating subtitles folder: %v", err)
 	}
 
 	srtFilePath := filepath.Join(srtFolderPath, "subtitles.json")
-	return ioutil.WriteFile(srtFilePath, []byte(srtContent), 0644)
+	err = ioutil.WriteFile(srtFilePath, []byte(srtContent), 0644)
+	if err != nil {
+		return asrSentences, fmt.Errorf("error writing SRT file: %v", err)
+	}
+
+	var asr ASR
+	err = json.Unmarshal([]byte(srtContent), &asr)
+	if err != nil {
+		log.Printf("[ERROR] Error unmarshalling ASR content: %v", err)
+		return asrSentences, err
+	}
+
+	asrSentences = asr.Sentences
+
+	return asrSentences, err
 }
 
 func generateSRTWithWhisper(audioFilePath string) (string, error) {
@@ -629,7 +748,9 @@ func generateDallEPromptForSentenceGemini(formattedSentence string, video *model
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-pro")
+	// model := client.GenerativeModel("gemini-pro")
+	// use gemini flash
+	model := client.GenerativeModel("gemini-1.5-flash")
 
 	styleInstruction := getStyleInstruction(video.VideoStyle)
 
@@ -640,10 +761,10 @@ Focus on the sentence, last sentence, topic and theme given by the user.
 Sentence: %s
 Topic: %s
 Last sentence (Please use this information to create a coherent narrative): %s
+Essence of the video (Please use this very loosely): %s 
 
 Style Instruction: %s
 Guidelines for crafting the prompt:
-
 The sentence given to you is almost a sentence. Try to understand the context and generate a prompt that is visually appealing and creatively.
 
 Emphasize visual elements and atmosphere rather than literal interpretation of the sentence.
@@ -662,7 +783,7 @@ Specify the desired level of detail or realism (e.g. "photorealistic", "impressi
 Avoid unnecessary formatting or markdown. Present the prompt as plain text.
 Keep the prompt concise but descriptive, aiming for 2-3 sentences maximum.
 Focus on creating a cohesive, visually striking image that captures the essence of the sentence and context.
-`, formattedSentence, video.Topic, lastSentence, styleInstruction)
+`, formattedSentence, video.Topic, video.Essence, lastSentence, styleInstruction)
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
@@ -700,7 +821,7 @@ func getStyleInstruction(style string) string {
 	}
 }
 
-func processContent(client *openai.Client, topic, description string) (string, string, error) {
+func processContent(client *openai.Client, topic, description string) (string, string, string, error) {
 	if isDevMode() {
 		return processContentGemini(topic, description)
 	}
@@ -718,9 +839,13 @@ func processContent(client *openai.Client, topic, description string) (string, s
 				"script": {
 					"type": "string",
 					"description": "A script for a 60-80 second video based on the topic and description. Must be engaging and informative, and suitable for a short-form video format. Pretend you are writing a script for a video on Instagram or YouTube Shorts, aiming for growth and engagement. Remember, that this is a script for the reel and NOT the caption. Maintain a tone accordingly. MUST be more than 200 words. DO NOT include any links or hashtags. DO NOT include any guidance on how to shoot the video OR any emojis. Try to be as creative and informative as possible."
+				},
+				"essence": {
+					"type": "string",
+					"description": "1-2 word essence of the video for the stock footage"
 				}
 			},
-			"required": ["cleaned_topic", "script"]
+			"required": ["cleaned_topic", "script", "essence"]
 		}`),
 	}
 
@@ -748,7 +873,7 @@ func processContent(client *openai.Client, topic, description string) (string, s
 	)
 
 	if err != nil {
-		return "", "", fmt.Errorf("error creating chat completion: %v", err)
+		return "", "", "", fmt.Errorf("error creating chat completion: %v", err)
 	}
 
 	functionArgs := resp.Choices[0].Message.FunctionCall.Arguments
@@ -758,33 +883,92 @@ func processContent(client *openai.Client, topic, description string) (string, s
 	var result struct {
 		CleanedTopic string `json:"cleaned_topic"`
 		Script       string `json:"script"`
+		Essence 	string `json:"essence"`
 	}
 
 	err = json.Unmarshal([]byte(functionArgs), &result)
 	if err != nil {
 		log.Printf("Result from AI: %s", functionArgs)
-		return "", "", fmt.Errorf("error parsing AI response: %v", err)
+		return "", "", "", fmt.Errorf("error parsing AI response: %v", err)
 	}
 
-	return result.CleanedTopic, result.Script, nil
+	return result.CleanedTopic, result.Script, result.Essence, nil
 }
 
-func processContentGemini(topic, description string) (string, string, error) {
+func GenerateScriptClaude(topic, description string) (string, string, string, error) {
+	client := anthropic.NewClient(
+		anthropicOpts.WithAPIKey(
+			os.Getenv("ANTHROPIC_API_KEY"),
+		),
+	)
+
+	systemMessage := "You are a professional script writer for social media. You write genuinely entertaining reels like a fancy marketing expert"
+
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(fmt.Sprintf(`Process the following content to create a cleaned topic and script for short-form video:
+
+Original topic: %s
+Description: %s
+
+Create a cleaned topic and script based on the given topic and description. The script should be engaging and informative and have 150-170 words.
+
+Format your response as a JSON object with the following structure:
+{
+    "cleaned_topic": "A more attractive and engaging version of the original topic",
+    "script": "A 60-80 second script for the video (150-170 words). Try to include 'uh', 'hmm', 'hehe', 'ah' into the script to make it sound more natural."
+    "essence": "1-2 word essence of the video for the stock footage"
+}
+
+Do not include hashtags, links, emojis, or any guidance on how to shoot the video or camera angles in the script.`, topic, description))),
+	}
+
+	message, err := client.Messages.New(context.TODO(), anthropic.MessageNewParams{
+		Model:     anthropic.F(anthropic.ModelClaude_3_5_Sonnet_20240620),
+		MaxTokens: anthropic.Int(1024),
+		System: anthropic.F([]anthropic.TextBlockParam{
+			anthropic.NewTextBlock(systemMessage),
+		}),
+		Messages: anthropic.F(messages),
+	})
+	if err != nil {
+		return "", "", "", fmt.Errorf("error generating content with Claude: %v", err)
+	}
+
+	var result struct {
+		CleanedTopic string `json:"cleaned_topic"`
+		Script       string `json:"script"`
+		Essence      string `json:"essence"`
+	}
+
+	if len(message.Content) == 0 || message.Content[0].Type != "text" {
+		return "", "", "", fmt.Errorf("unexpected response format from Claude")
+	}
+
+	err = json.Unmarshal([]byte(message.Content[0].Text), &result)
+	if err != nil {
+		return "", "", "", fmt.Errorf("error parsing Claude response: %v", err)
+	}
+
+	return result.CleanedTopic, result.Script, result.Essence, nil
+}
+
+func processContentGemini(topic, description string) (string, string, string, error) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
 	if err != nil {
-		return "", "", fmt.Errorf("error creating Gemini client: %v", err)
+		return "", "", "", fmt.Errorf("error creating Gemini client: %v", err)
 	}
 	defer client.Close()
 
-	model := client.GenerativeModel("gemini-pro")
+	// model := client.GenerativeModel("gemini-pro")
+	model := client.GenerativeModel("gemini-1.5-flash")
 
 	prompt := fmt.Sprintf(`Process the following content to create a cleaned topic and script for short-form video:
 
 Original topic: %s
 Description: %s
 
-You are a script writer for social media to help with TikTok, Instagram, YouTube Shorts, and other short-form video content. Create a cleaned topic and script based on the given topic and description. The script should be engaging and informative, suitable for a 60-80 second video.
+You are a script writer for social media to help with TikTok, Instagram, YouTube Shorts, and other short-form video content. Create a cleaned topic and script based on the given topic and description. The script should be engaging and informative and have 140-170 words.
 
 Make sure to not include any [ ] or any guidance on how to shoot the video or camera angles in the script.
 
@@ -792,17 +976,18 @@ Please format your response as a JSON object with the following structure: (Make
 {
     "cleaned_topic": "A more attractive and engaging version of the original topic",
     "script": "A 60-80 second script for the video (more than 200 words)"
+	"essence": "1-2 word essence of the video for the stock footage"
 }
 
 Do not include hashtags, links, emojis, or any guidance on how to shoot the video or camera angles in the script.`, topic, description)
 
 	resp, err := model.GenerateContent(ctx, genai.Text(prompt))
 	if err != nil {
-		return "", "", fmt.Errorf("error generating content: %v", err)
+		return "", "", "", fmt.Errorf("error generating content: %v", err)
 	}
 
 	if len(resp.Candidates) == 0 || len(resp.Candidates[0].Content.Parts) == 0 {
-		return "", "", fmt.Errorf("no content generated")
+		return "", "", "", fmt.Errorf("no content generated")
 	}
 
 	jsonResponse := resp.Candidates[0].Content.Parts[0].(genai.Text)
@@ -825,12 +1010,13 @@ Do not include hashtags, links, emojis, or any guidance on how to shoot the vide
 	var result struct {
 		CleanedTopic string `json:"cleaned_topic"`
 		Script       string `json:"script"`
+		Essence	  string `json:"essence"`
 	}
 
 	err = json.Unmarshal([]byte(jsonResponseFinal), &result)
 	if err != nil {
-		return "", "", fmt.Errorf("error parsing Gemini response: %v", err)
+		return "", "", "", fmt.Errorf("error parsing Gemini response: %v", err)
 	}
 
-	return result.CleanedTopic, result.Script, nil
+	return result.CleanedTopic, result.Script, result.Essence, nil
 }

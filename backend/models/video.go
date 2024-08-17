@@ -28,6 +28,10 @@ type Video struct {
 
 	Progress int `json:"progress" gorm:"default:0"`
 
+	MediaType string `json:"mediaType" gorm:"default:ai"` // ai or stock (from pexels)
+
+	Essence string `json:"essence" gorm:"null"` // the essence of the video
+
 	// maybe, hide this from the user
 	Error string `json:"error" gorm:"null"`
 

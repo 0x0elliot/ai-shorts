@@ -397,8 +397,8 @@ fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
     content.push_str(
         "[Script Info]\n\
         ScriptType: v4.00+\n\
-        PlayResX: 1080\n\
-        PlayResY: 1920\n\
+        PlayResX: 1920\n\
+        PlayResY: 1080\n\
         \n\
         [V4+ Styles]\n\
         Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
@@ -414,33 +414,40 @@ fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
             .filter(|w| w.start >= sentence.start && w.end <= sentence.end)
             .collect();
 
-        for (i, word) in words_in_sentence.iter().enumerate() {
-            let start_time = format_time(word.start);
-            let end_time = if i < words_in_sentence.len() - 1 {
-                format_time(words_in_sentence[i + 1].start)
-            } else {
-                format_time(sentence.end)
-            };
+        let chunks = words_in_sentence.chunks(3);
+        let chunk_count = chunks.len();
 
-            let mut highlighted_sentence = String::new();
-            for (j, w) in words_in_sentence.iter().enumerate() {
-                if j < i {
-                    highlighted_sentence.push_str(&w.word);
-                } else if j == i {
-                    highlighted_sentence.push_str(&format!("{{\\c&H00FFFF&}}{}", w.word));
+        for (chunk_index, chunk) in chunks.enumerate() {
+            for (word_index, word) in chunk.iter().enumerate() {
+                let start_time = format_time(word.start);
+                let end_time = if word_index == chunk.len() - 1 && chunk_index == chunk_count - 1 {
+                    format_time(sentence.end)
+                } else if word_index == chunk.len() - 1 {
+                    format_time(chunk.last().unwrap().end)
                 } else {
-                    highlighted_sentence.push_str(&format!("{{\\c&HFFFFFF&}}{}", w.word));
-                }
-                
-                if j < words_in_sentence.len() - 1 {
-                    highlighted_sentence.push(' ');
-                }
-            }
+                    format_time(chunk[word_index + 1].start)
+                };
 
-            content.push_str(&format!(
-                "Dialogue: 0,{},{},Default,,0,0,0,,{}\n",
-                start_time, end_time, highlighted_sentence
-            ));
+                let mut highlighted_chunk = String::new();
+                for (i, w) in chunk.iter().enumerate() {
+                    if i < word_index {
+                        highlighted_chunk.push_str(&w.word);
+                    } else if i == word_index {
+                        highlighted_chunk.push_str(&format!("{{\\c&H00FFFF&}}{}", w.word));
+                    } else {
+                        highlighted_chunk.push_str(&format!("{{\\c&HFFFFFF&}}{}", w.word));
+                    }
+                    
+                    // if i < chunk.len() - 1 {
+                    //     highlighted_chunk.push(' ');
+                    // }
+                }
+
+                content.push_str(&format!(
+                    "Dialogue: 0,{},{},Default,,0,0,0,,{{\\an5}}{}\\N\n",
+                    start_time, end_time, highlighted_chunk
+                ));
+            }
         }
     }
 

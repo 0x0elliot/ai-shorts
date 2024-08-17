@@ -167,11 +167,11 @@ fn create_slideshow_with_subtitles(
         println!("Created output directory: {:?}", parent);
     }
 
-    let srt_file = format!("/tmp/{}.srt", video_id);
+    let ass_file = format!("/tmp/{}.ass", video_id);
 
-    // Create SRT subtitle file
-    create_subtitle_file(asr_data, &srt_file).context("Failed to create SRT subtitle file")?;
-    println!("Created SRT subtitle file for {}", video_id);
+    // Create ASS subtitle file
+    create_subtitle_file(asr_data, &ass_file).context("Failed to create ASS subtitle file")?;
+    println!("Created ASS subtitle file for {}", video_id);
 
     // Sort image paths
     let mut sorted_image_paths = image_paths.to_vec();
@@ -226,9 +226,10 @@ fn create_slideshow_with_subtitles(
     // Combine video and audio
     filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
 
+    // Add ASS subtitles
     filter_complex.push_str(&format!(
-        "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=4,BackColour=&H80000000,Outline=1,OutlineColour=&H000000,Shadow=0,MarginV=25,Fontname=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Roboto-Bold.ttf,Fontsize=24,PrimaryColour=&H00FFFF&'[output]", 
-        srt_file
+        "[outv_a]ass={}[output]", 
+        ass_file
     ));
 
     ffmpeg_args.extend(vec!["-filter_complex".to_string(), filter_complex]);
@@ -249,7 +250,7 @@ fn create_slideshow_with_subtitles(
 
     // Run FFmpeg command
     println!("Starting FFmpeg process for video_id: {}", video_id);
-    let output = std::process::Command::new("ffmpeg")
+    let output = Command::new("ffmpeg")
         .args(&ffmpeg_args)
         .output()
         .context("Failed to execute FFmpeg command")?;
@@ -268,14 +269,181 @@ fn create_slideshow_with_subtitles(
     Ok(())
 }
 
+// fn create_slideshow_with_subtitles(
+//     image_paths: &[PathBuf],
+//     asr_data: &ASRData,
+//     audio_file: &str,
+//     output_file: &str,
+//     video_id: &str
+// ) -> Result<()> {
+//     let start_time = Instant::now();
+
+//     // Ensure the output directory exists
+//     if let Some(parent) = Path::new(output_file).parent() {
+//         std::fs::create_dir_all(parent).context("Failed to create output directory")?;
+//         println!("Created output directory: {:?}", parent);
+//     }
+
+//     let srt_file = format!("/tmp/{}.srt", video_id);
+
+//     // Create SRT subtitle file
+//     create_subtitle_file(asr_data, &srt_file).context("Failed to create SRT subtitle file")?;
+//     println!("Created SRT subtitle file for {}", video_id);
+
+//     // Sort image paths
+//     let mut sorted_image_paths = image_paths.to_vec();
+//     sorted_image_paths.sort_by(|a, b| {
+//         let a_num = a.file_stem().unwrap().to_str().unwrap().split('_').last().unwrap().parse::<u32>().unwrap();
+//         let b_num = b.file_stem().unwrap().to_str().unwrap().split('_').last().unwrap().parse::<u32>().unwrap();
+//         a_num.cmp(&b_num)
+//     });
+
+//     // Prepare FFmpeg command
+//     let mut ffmpeg_args = vec![
+//         "-y".to_string(),  // Overwrite output file if it exists
+//     ];
+
+//     // Add input images and audio
+//     for path in &sorted_image_paths {
+//         ffmpeg_args.extend(vec![
+//             "-loop".to_string(),
+//             "1".to_string(),
+//             "-i".to_string(),
+//             path.to_str().unwrap().to_string()
+//         ]);
+//     }
+//     ffmpeg_args.extend(vec!["-i".to_string(), audio_file.to_string()]);
+
+//     // Create filter complex
+//     let mut filter_complex = String::new();
+//     for i in 0..sorted_image_paths.len() {
+//         filter_complex.push_str(&format!(
+//             "[{}:v]scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},setsar=1[v{}];", 
+//             i, REEL_WIDTH, REEL_HEIGHT, REEL_WIDTH, REEL_HEIGHT, i
+//         ));
+//     }
+
+//     // Create timeline for images
+//     let mut timeline = String::new();
+//     let total_duration = asr_data.sentences.last().unwrap().end;
+//     for (i, sentence) in asr_data.sentences.iter().enumerate() {
+//         let start = if i == 0 { 0.0 } else { asr_data.sentences[i-1].end };
+//         let duration = sentence.end - start;
+//         timeline.push_str(&format!("[v{}]trim=0:{},setpts=PTS-STARTPTS[v{}trim];", i, duration, i));
+//     }
+//     timeline.push_str(&format!("{}concat=n={}:v=1:a=0[outv];", 
+//         (0..sorted_image_paths.len()).map(|i| format!("[v{}trim]", i)).collect::<Vec<_>>().join(""), 
+//         sorted_image_paths.len()));
+
+//     filter_complex.push_str(&timeline);
+    
+//     // Add audio
+//     filter_complex.push_str(&format!("[{}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:{}[audio];", sorted_image_paths.len(), total_duration));
+    
+//     // Combine video and audio
+//     filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
+
+//     filter_complex.push_str(&format!(
+//         "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=4,BackColour=&H80000000,Outline=1,OutlineColour=&H000000,Shadow=0,MarginV=25,Fontname=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Anton-Regular.ttf,Fontsize=24,PrimaryColour=&H00FFFF&'[output]", 
+//         srt_file
+//     ));
+
+//     // filter_complex.push_str(&format!(
+//     //     "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=3,Outline=0,Shadow=0,MarginV=25,FontFile=Anton-Regular.ttf,Fontsize=24,PrimaryColour=&H0080FF&'[output]", 
+//     //     srt_file
+//     // ));
+
+//     ffmpeg_args.extend(vec!["-filter_complex".to_string(), filter_complex]);
+
+//     // Output mapping
+//     ffmpeg_args.extend(vec![
+//         "-map".to_string(), "[output]".to_string(),
+//         "-c:a".to_string(), "aac".to_string(),
+//         "-c:v".to_string(), "libx264".to_string(),
+//         "-preset".to_string(), "medium".to_string(),
+//         "-crf".to_string(), "23".to_string(),
+//         "-movflags".to_string(), "+faststart".to_string(),
+//         "-pix_fmt".to_string(), "yuv420p".to_string(),
+//     ]);
+
+//     // Add output file
+//     ffmpeg_args.push(output_file.to_string());
+
+//     // Run FFmpeg command
+//     println!("Starting FFmpeg process for video_id: {}", video_id);
+//     let output = std::process::Command::new("ffmpeg")
+//         .args(&ffmpeg_args)
+//         .output()
+//         .context("Failed to execute FFmpeg command")?;
+
+//     if !output.status.success() {
+//         println!("FFmpeg command failed for command: {}", ffmpeg_args.join(" "));
+
+//         let error_msg = String::from_utf8_lossy(&output.stderr);
+//         println!("FFmpeg error: {}", error_msg);
+//         return Err(anyhow!("FFmpeg error: {}", error_msg));
+//     }
+
+//     let duration = start_time.elapsed();
+//     println!("Slideshow creation completed in {:.2} seconds", duration.as_secs_f64());
+
+//     Ok(())
+// }
 
 fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
     let mut content = String::new();
-    for (i, word) in asr_data.words.iter().enumerate() {
-        let start = format_time(word.start);
-        let end = format_time(word.end);
-        content.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, start, end, word.word));
+    
+    // ASS file header
+    content.push_str(
+        "[Script Info]\n\
+        ScriptType: v4.00+\n\
+        PlayResX: 1080\n\
+        PlayResY: 1920\n\
+        \n\
+        [V4+ Styles]\n\
+        Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n\
+        Style: Default,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1\n\
+        \n\
+        [Events]\n\
+        Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n\n"
+    );
+
+    for sentence in &asr_data.sentences {
+        let words_in_sentence: Vec<&Word> = asr_data.words
+            .iter()
+            .filter(|w| w.start >= sentence.start && w.end <= sentence.end)
+            .collect();
+
+        for (i, word) in words_in_sentence.iter().enumerate() {
+            let start_time = format_time(word.start);
+            let end_time = if i < words_in_sentence.len() - 1 {
+                format_time(words_in_sentence[i + 1].start)
+            } else {
+                format_time(sentence.end)
+            };
+
+            let mut highlighted_sentence = String::new();
+            for (j, w) in words_in_sentence.iter().enumerate() {
+                if j < i {
+                    highlighted_sentence.push_str(&w.word);
+                } else if j == i {
+                    highlighted_sentence.push_str(&format!("{{\\c&H00FFFF&}}{}", w.word));
+                } else {
+                    highlighted_sentence.push_str(&format!("{{\\c&HFFFFFF&}}{}", w.word));
+                }
+                
+                if j < words_in_sentence.len() - 1 {
+                    highlighted_sentence.push(' ');
+                }
+            }
+
+            content.push_str(&format!(
+                "Dialogue: 0,{},{},Default,,0,0,0,,{}\n",
+                start_time, end_time, highlighted_sentence
+            ));
+        }
     }
+
     fs::write(output_file, content).context("Failed to write subtitle file")?;
     Ok(())
 }
@@ -284,9 +452,28 @@ fn format_time(seconds: f64) -> String {
     let hours = (seconds / 3600.0) as i32;
     let minutes = ((seconds % 3600.0) / 60.0) as i32;
     let secs = (seconds % 60.0) as i32;
-    let millis = ((seconds - seconds.floor()) * 1000.0) as i32;
-    format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
+    let centisecs = ((seconds - seconds.floor()) * 100.0) as i32;
+    format!("{:01}:{:02}:{:02}.{:02}", hours, minutes, secs, centisecs)
 }
+
+// fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
+//     let mut content = String::new();
+//     for (i, word) in asr_data.words.iter().enumerate() {
+//         let start = format_time(word.start);
+//         let end = format_time(word.end);
+//         content.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, start, end, word.word));
+//     }
+//     fs::write(output_file, content).context("Failed to write subtitle file")?;
+//     Ok(())
+// }
+
+// fn format_time(seconds: f64) -> String {
+//     let hours = (seconds / 3600.0) as i32;
+//     let minutes = ((seconds % 3600.0) / 60.0) as i32;
+//     let secs = (seconds % 60.0) as i32;
+//     let millis = ((seconds - seconds.floor()) * 1000.0) as i32;
+//     format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
+// }
 
 #[tokio::main]
 async fn main() {

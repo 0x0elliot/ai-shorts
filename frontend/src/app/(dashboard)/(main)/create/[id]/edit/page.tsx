@@ -117,6 +117,16 @@ export default function EditCreate() {
         })
     }
 
+    // on every progress % update, update the title of the page
+    useEffect(() => {
+        if (progress > 0 && progress < 100) {
+            document.title = `${progress}% - Video Creation in Progress`
+        } else if (progress === 100) {
+            document.title = 'Video Creation Complete!'
+        }
+    }
+    , [progress])
+
     const formatDate = (dateString) => {
         const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
         return new Date(dateString).toLocaleDateString(undefined, options);

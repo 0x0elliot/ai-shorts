@@ -260,6 +260,23 @@ export default function EditCreate() {
                                     </span>
                                 </div>
                             )}
+
+                            {video.topic && (
+                                <><h1 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Title:</h1><div className="flex justify-center items-center mb-4">
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {video.topic}
+                                    </span>
+                                </div></>
+                            )}
+
+                            {video.description && (
+                                <><h1 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Description:</h1><div className="flex justify-center items-center mb-4">
+                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            {video.description}
+                                        </span>
+                                    </div></>
+                            )}
+
                             <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 mb-4">
                                 <motion.div
                                     className="bg-blue-600 h-4 rounded-full transition-all duration-500"

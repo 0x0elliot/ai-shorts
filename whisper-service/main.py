@@ -23,7 +23,7 @@ def generate_asr_data(audio_file, original_script):
         for word in segment.words:
             if word_index < len(original_words):
                 # Find the closest matching word from the original script
-                closest_word = min(original_words[max(0, word_index-2):min(len(original_words), word_index+2)], 
+                closest_word = min(original_words[max(0, word_index-1):min(len(original_words), word_index+1)], 
                                    key=lambda x: Levenshtein.distance(word.word, x))
                 
                 asr_data["words"].append({

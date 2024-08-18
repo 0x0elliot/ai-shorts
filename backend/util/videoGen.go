@@ -102,7 +102,7 @@ func callStitchingAPI(videoID string, musicFile string) (outputUrl string, err e
 		return "", fmt.Errorf("failed to send request: %v", err)
 	}
 
-	log.Printf("[INFO] Successfully created slideshow with subtitles..")
+	log.Printf("[INFO] Successfully created slideshow with subtitles. Status code: %v", res.StatusCode)
 
 	// Decode the response
 	var response StitchingAPIResponse

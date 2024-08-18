@@ -251,11 +251,27 @@ fn create_slideshow_with_subtitles(
     // Create timeline for images
     let mut timeline = String::new();
     let total_duration = asr_data.sentences.last().unwrap().end;
+    // for (i, sentence) in asr_data.sentences.iter().enumerate() {
+    //     let start = if i == 0 { 0.0 } else { asr_data.sentences[i-1].end };
+    //     let duration = sentence.end - start;
+    //     timeline.push_str(&format!("[v{}]trim=0:{},setpts=PTS-STARTPTS[v{}trim];", i, duration, i));
+    // }
+
+    let mut last_valid_image = 0;
     for (i, sentence) in asr_data.sentences.iter().enumerate() {
         let start = if i == 0 { 0.0 } else { asr_data.sentences[i-1].end };
         let duration = sentence.end - start;
-        timeline.push_str(&format!("[v{}]trim=0:{},setpts=PTS-STARTPTS[v{}trim];", i, duration, i));
+        
+        if duration >= 1.0 {
+            last_valid_image = i;
+        }
+        
+        timeline.push_str(&format!(
+            "[v{}]trim={}:{},setpts=PTS-STARTPTS[v{}trim];",
+            i, start, sentence.end, i
+        ));
     }
+    
     timeline.push_str(&format!("{}concat=n={}:v=1:a=0[outv];", 
         (0..sorted_image_paths.len()).map(|i| format!("[v{}trim]", i)).collect::<Vec<_>>().join(""), 
         sorted_image_paths.len()));

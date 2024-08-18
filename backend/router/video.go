@@ -122,7 +122,6 @@ func CreateSchedule(c *fiber.Ctx) error {
 		BackgroundMusic string `json:"backgroundMusic"`
 	}
 
-
 	var req CreateScheduleRequest
 	if err := c.BodyParser(&req); err != nil {
 		log.Printf("[ERROR] Error parsing request: %v", err)
@@ -132,9 +131,29 @@ func CreateSchedule(c *fiber.Ctx) error {
 		})
 	}
 
-	
+	// const [musicTracks] = useState([
+    //     { name: "Another love", value: "_another-love" },
+    //     { name: "Bladerunner 2049", value: "_bladerunner-2049" },
+    //     { name: "Constellations", value: "_constellations" },
+    //     { name: "Fallen", value: "_fallen" },
+    //     { name: "Hotline", value: "_hotline" },
+    //     { name: "Izzamuzzic", value: "_izzamuzzic" },
+    //     { name: "Nas", value: "_nas" },
+    //     { name: "Paris else", value: "_paris-else" },
+    //     { name: "Snowfall", value: "_snowfall" },
+    // ])
 
-	// vverify if narrator is valid
+	validTracks := []string{"_another-love", "_bladerunner-2049", "_constellations", "_fallen", "_hotline", "_izzamuzzic", "_nas", "_paris-else", "_snowfall"}
+
+	if !util.Contains(validTracks, req.BackgroundMusic) {
+		log.Printf("[ERROR] Invalid background music: %v", req.BackgroundMusic)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": true,
+			"message": "Invalid background music",
+		})
+	}
+
+	// verify if narrator is valid
 	narrators := []string{"alloy", "echo", "fable", "nova", "onyx", "shimmer"}
 	if !util.Contains(narrators, req.Narrator) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -161,6 +180,13 @@ func CreateSchedule(c *fiber.Ctx) error {
 		})
 	}
 
+	if req.BackgroundMusic == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": true,
+			"message": "Background music is required",
+		})
+	}
+
 	// save video
 	videoData := &models.Video{
 		Topic: req.Topic,
@@ -172,6 +198,7 @@ func CreateSchedule(c *fiber.Ctx) error {
 		OwnerID: user.ID,
 		Owner: *user,
 		VideoTheme: req.VideoTheme,
+		BackgroundMusic: req.BackgroundMusic,
 	}
 
 	video, err := util.SetVideo(videoData)

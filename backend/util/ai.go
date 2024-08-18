@@ -98,27 +98,27 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	if recreate {
 		video.Error = ""
-		// if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
-		// 	log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
-		// 	videoPtr, err := StitchVideo(*video);
-		// 	if err != nil {
-		// 		log.Printf("[ERROR] Error stitching video: %v", err)
-		// 		return nil, SaveVideoError(video, err)
-		// 	}
+		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
+			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
+			videoPtr, err := StitchVideo(*video);
+			if err != nil {
+				log.Printf("[ERROR] Error stitching video: %v", err)
+				return nil, SaveVideoError(video, err)
+			}
 
-		// 	video = &videoPtr
+			video = &videoPtr
 
-		// 	// Update video progress
-		// 	video.Progress = 100
-		// 	video.VideoStitched = true
+			// Update video progress
+			video.Progress = 100
+			video.VideoStitched = true
 
-		// 	video, err := SetVideo(video)
-		// 	if err != nil {
-		// 		log.Printf("[ERROR] Error saving video: %v", err)
-		// 		return nil, SaveVideoError(video, err)
-		// 	}
-		// 	return video, nil
-		// }
+			video, err := SetVideo(video)
+			if err != nil {
+				log.Printf("[ERROR] Error saving video: %v", err)
+				return nil, SaveVideoError(video, err)
+			}
+			return video, nil
+		}
 
 		folderPath := getVideoFolderPath(video.ID)
 		if err := os.RemoveAll(folderPath); err != nil {
@@ -1008,6 +1008,8 @@ Format your response as a JSON object with the following structure:
     "essence": "1-2 word essence of the video for the stock footage"
 }
 
+Remember, your response will be directly parsed. Do not even include a paragraph briefing on what you're doing. Just give a clean JSON response with good work.
+
 Do not include hashtags, links, emojis, or any guidance on how to shoot the video or camera angles in the script.`, topic, description))),
 	}
 
@@ -1030,11 +1032,13 @@ Do not include hashtags, links, emojis, or any guidance on how to shoot the vide
 	}
 
 	if len(message.Content) == 0 || message.Content[0].Type != "text" {
+		log.Printf("Unexpected response format from Claude: %v", message)
 		return "", "", "", fmt.Errorf("unexpected response format from Claude")
 	}
 
 	err = json.Unmarshal([]byte(message.Content[0].Text), &result)
 	if err != nil {
+		log.Printf("Unexpected response format from Claude: %v", message)
 		return "", "", "", fmt.Errorf("error parsing Claude response: %v", err)
 	}
 

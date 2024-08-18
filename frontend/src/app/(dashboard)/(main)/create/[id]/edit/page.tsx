@@ -8,7 +8,7 @@ import { siteConfig } from '@/app/siteConfig'
 import { motion } from 'framer-motion'
 import confetti from 'canvas-confetti'
 import { Button } from '@/components/ui/button'
-import { CheckCircle2, Tag, Clock, Download } from 'lucide-react'
+import { CheckCircle2, Tag, Clock, Download, Music } from 'lucide-react'
 
 const progressSteps = [
     { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
@@ -258,6 +258,15 @@ export default function EditCreate() {
                                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                         {video.videoStyle}
                                     </span>
+
+                                    {video.backgroundMusic && (<>
+                                        <Music className="text-gray-500 mr-2 ml-2" size={16} />
+                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                            {video.backgroundMusic}
+                                        </span>
+                                        </>
+                                    )}
+
                                 </div>
                             )}
 
@@ -271,10 +280,10 @@ export default function EditCreate() {
 
                             {video.description && (
                                 <><h1 className="text-lg font-semibold text-gray-700 dark:text-gray-300">Description:</h1><div className="flex justify-center items-center mb-4">
-                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                                            {video.description}
-                                        </span>
-                                    </div></>
+                                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                        {video.description}
+                                    </span>
+                                </div></>
                             )}
 
                             <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 mb-4">

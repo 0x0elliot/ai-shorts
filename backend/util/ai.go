@@ -98,27 +98,27 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	if recreate {
 		video.Error = ""
-		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
-			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
-			videoPtr, err := StitchVideo(*video);
-			if err != nil {
-				log.Printf("[ERROR] Error stitching video: %v", err)
-				return nil, SaveVideoError(video, err)
-			}
+		// if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
+		// 	log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
+		// 	videoPtr, err := StitchVideo(*video);
+		// 	if err != nil {
+		// 		log.Printf("[ERROR] Error stitching video: %v", err)
+		// 		return nil, SaveVideoError(video, err)
+		// 	}
 
-			video = &videoPtr
+		// 	video = &videoPtr
 
-			// Update video progress
-			video.Progress = 100
-			video.VideoStitched = true
+		// 	// Update video progress
+		// 	video.Progress = 100
+		// 	video.VideoStitched = true
 
-			video, err := SetVideo(video)
-			if err != nil {
-				log.Printf("[ERROR] Error saving video: %v", err)
-				return nil, SaveVideoError(video, err)
-			}
-			return video, nil
-		}
+		// 	video, err := SetVideo(video)
+		// 	if err != nil {
+		// 		log.Printf("[ERROR] Error saving video: %v", err)
+		// 		return nil, SaveVideoError(video, err)
+		// 	}
+		// 	return video, nil
+		// }
 
 		folderPath := getVideoFolderPath(video.ID)
 		if err := os.RemoveAll(folderPath); err != nil {

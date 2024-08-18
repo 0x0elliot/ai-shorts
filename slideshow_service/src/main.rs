@@ -44,6 +44,7 @@ struct ASRData {
 #[derive(Debug, Deserialize)]
 struct CreateSlideshowRequest {
     video_id: String,
+    music: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +104,38 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
         let audio_file = video_folder.join("audio/full_audio.mp3");
         let output_file = video_folder.join("output_rust.mp4");
 
+        let allowed_options = vec![
+            "_another-love",
+            "_bladerunner-2049",
+            "_constellations",
+            "_fallen",
+            "_hotline",
+            "_izzamuzzic",
+            "_nas",
+            "_paris-else",
+            "_snowfall",
+        ];
+
+        if req.music == "" {
+            return Err(anyhow!("Music is required"));
+        }
+
+        if !allowed_options.contains(&req.music.as_str()) {
+            return Err(anyhow!("Invalid music option"));
+        }
+
+        // music is in /tmp/music/ folder
+        // i will just copy it in the dockerfile
+        let mut music_file = PathBuf::from("/tmp/music/").join(req.music);
+
+        if !music_file.extension().map_or(false, |ext| ext == "mp3") {
+            music_file.set_extension("mp3");
+        }
+
+        if !music_file.exists() {
+            return Err(anyhow!("Music file does not exist!"));
+        }
+
         // Read and parse the subtitles.json file
         let asr_data: ASRData = serde_json::from_str(&fs::read_to_string(&subtitles_path)
             .context("Failed to read subtitles.json")?).context("Failed to parse subtitles.json")?;
@@ -121,7 +154,7 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
             })
             .collect();
 
-        create_slideshow_with_subtitles(&image_paths, &asr_data, audio_file.to_str().unwrap(), output_file.to_str().unwrap(), &req.video_id)
+        create_slideshow_with_subtitles(&image_paths, &asr_data, audio_file.to_str().unwrap(), output_file.to_str().unwrap(), &req.video_id, music_file.to_str().unwrap())
             .context("Failed to create slideshow")?;
 
         println!("Slideshow created successfully");
@@ -157,7 +190,8 @@ fn create_slideshow_with_subtitles(
     asr_data: &ASRData,
     audio_file: &str,
     output_file: &str,
-    video_id: &str
+    video_id: &str,
+    music_file: &str
 ) -> Result<()> {
     let start_time = Instant::now();
 
@@ -186,7 +220,7 @@ fn create_slideshow_with_subtitles(
         "-y".to_string(),  // Overwrite output file if it exists
     ];
 
-    // Add input images and audio
+    // Add input images, narration audio, and background music
     for path in &sorted_image_paths {
         ffmpeg_args.extend(vec![
             "-loop".to_string(),
@@ -195,7 +229,19 @@ fn create_slideshow_with_subtitles(
             path.to_str().unwrap().to_string()
         ]);
     }
-    ffmpeg_args.extend(vec!["-i".to_string(), audio_file.to_string()]);
+    
+    ffmpeg_args.extend(vec![
+        "-i".to_string(), audio_file.to_string(),
+        // "-i".to_string(), music_file.to_string(),
+    ]);
+
+
+    println!("music_file: {} and {}", music_file, music_file != "/tmp/music/");
+
+    // if music_file == "/tmp/music/" {
+    if music_file != "/tmp/music/" {
+        ffmpeg_args.extend(vec!["-i".to_string(), music_file.to_string()]);
+    }
 
     // Create filter complex
     let mut filter_complex = String::new();
@@ -220,11 +266,29 @@ fn create_slideshow_with_subtitles(
 
     filter_complex.push_str(&timeline);
     
-    // Add audio
-    filter_complex.push_str(&format!("[{}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:{}[audio];", sorted_image_paths.len(), total_duration));
+    // Add narration audio and background music
+    filter_complex.push_str(&format!(
+        "[{}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:{}[narration];", 
+        sorted_image_paths.len(), total_duration
+    ));
+
+    if music_file != "/tmp/music/" {
+        filter_complex.push_str(&format!(
+            "[{}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:{},volume=0.05[background];", 
+            sorted_image_paths.len() + 1, total_duration
+        ));    
+    }
+
+    if music_file != "/tmp/music/" {
+        filter_complex.push_str("[narration][background]amix=inputs=2:duration=first[mixed_audio];");
+    } else {
+        filter_complex.push_str("[narration]amix=inputs=1:duration=first[mixed_audio];");
+    }
+    // Mix narration and background music
+    // filter_complex.push_str("[narration][background]amix=inputs=2:duration=first[mixed_audio];");
     
-    // Combine video and audio
-    filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
+    // Combine video and mixed audio
+    filter_complex.push_str("[outv][mixed_audio]concat=n=1:v=1:a=1[outv_a];");
 
     // Add ASS subtitles
     filter_complex.push_str(&format!(
@@ -268,127 +332,6 @@ fn create_slideshow_with_subtitles(
 
     Ok(())
 }
-
-// fn create_slideshow_with_subtitles(
-//     image_paths: &[PathBuf],
-//     asr_data: &ASRData,
-//     audio_file: &str,
-//     output_file: &str,
-//     video_id: &str
-// ) -> Result<()> {
-//     let start_time = Instant::now();
-
-//     // Ensure the output directory exists
-//     if let Some(parent) = Path::new(output_file).parent() {
-//         std::fs::create_dir_all(parent).context("Failed to create output directory")?;
-//         println!("Created output directory: {:?}", parent);
-//     }
-
-//     let srt_file = format!("/tmp/{}.srt", video_id);
-
-//     // Create SRT subtitle file
-//     create_subtitle_file(asr_data, &srt_file).context("Failed to create SRT subtitle file")?;
-//     println!("Created SRT subtitle file for {}", video_id);
-
-//     // Sort image paths
-//     let mut sorted_image_paths = image_paths.to_vec();
-//     sorted_image_paths.sort_by(|a, b| {
-//         let a_num = a.file_stem().unwrap().to_str().unwrap().split('_').last().unwrap().parse::<u32>().unwrap();
-//         let b_num = b.file_stem().unwrap().to_str().unwrap().split('_').last().unwrap().parse::<u32>().unwrap();
-//         a_num.cmp(&b_num)
-//     });
-
-//     // Prepare FFmpeg command
-//     let mut ffmpeg_args = vec![
-//         "-y".to_string(),  // Overwrite output file if it exists
-//     ];
-
-//     // Add input images and audio
-//     for path in &sorted_image_paths {
-//         ffmpeg_args.extend(vec![
-//             "-loop".to_string(),
-//             "1".to_string(),
-//             "-i".to_string(),
-//             path.to_str().unwrap().to_string()
-//         ]);
-//     }
-//     ffmpeg_args.extend(vec!["-i".to_string(), audio_file.to_string()]);
-
-//     // Create filter complex
-//     let mut filter_complex = String::new();
-//     for i in 0..sorted_image_paths.len() {
-//         filter_complex.push_str(&format!(
-//             "[{}:v]scale={}:{}:force_original_aspect_ratio=increase,crop={}:{},setsar=1[v{}];", 
-//             i, REEL_WIDTH, REEL_HEIGHT, REEL_WIDTH, REEL_HEIGHT, i
-//         ));
-//     }
-
-//     // Create timeline for images
-//     let mut timeline = String::new();
-//     let total_duration = asr_data.sentences.last().unwrap().end;
-//     for (i, sentence) in asr_data.sentences.iter().enumerate() {
-//         let start = if i == 0 { 0.0 } else { asr_data.sentences[i-1].end };
-//         let duration = sentence.end - start;
-//         timeline.push_str(&format!("[v{}]trim=0:{},setpts=PTS-STARTPTS[v{}trim];", i, duration, i));
-//     }
-//     timeline.push_str(&format!("{}concat=n={}:v=1:a=0[outv];", 
-//         (0..sorted_image_paths.len()).map(|i| format!("[v{}trim]", i)).collect::<Vec<_>>().join(""), 
-//         sorted_image_paths.len()));
-
-//     filter_complex.push_str(&timeline);
-    
-//     // Add audio
-//     filter_complex.push_str(&format!("[{}:a]aformat=sample_fmts=fltp:sample_rates=44100:channel_layouts=stereo,atrim=0:{}[audio];", sorted_image_paths.len(), total_duration));
-    
-//     // Combine video and audio
-//     filter_complex.push_str("[outv][audio]concat=n=1:v=1:a=1[outv_a];");
-
-//     filter_complex.push_str(&format!(
-//         "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=4,BackColour=&H80000000,Outline=1,OutlineColour=&H000000,Shadow=0,MarginV=25,Fontname=/Users/aditya/Documents/OSS/zappush/shortpro/backend/public/Anton-Regular.ttf,Fontsize=24,PrimaryColour=&H00FFFF&'[output]", 
-//         srt_file
-//     ));
-
-//     // filter_complex.push_str(&format!(
-//     //     "[outv_a]subtitles={}:force_style='Alignment=10,BorderStyle=3,Outline=0,Shadow=0,MarginV=25,FontFile=Anton-Regular.ttf,Fontsize=24,PrimaryColour=&H0080FF&'[output]", 
-//     //     srt_file
-//     // ));
-
-//     ffmpeg_args.extend(vec!["-filter_complex".to_string(), filter_complex]);
-
-//     // Output mapping
-//     ffmpeg_args.extend(vec![
-//         "-map".to_string(), "[output]".to_string(),
-//         "-c:a".to_string(), "aac".to_string(),
-//         "-c:v".to_string(), "libx264".to_string(),
-//         "-preset".to_string(), "medium".to_string(),
-//         "-crf".to_string(), "23".to_string(),
-//         "-movflags".to_string(), "+faststart".to_string(),
-//         "-pix_fmt".to_string(), "yuv420p".to_string(),
-//     ]);
-
-//     // Add output file
-//     ffmpeg_args.push(output_file.to_string());
-
-//     // Run FFmpeg command
-//     println!("Starting FFmpeg process for video_id: {}", video_id);
-//     let output = std::process::Command::new("ffmpeg")
-//         .args(&ffmpeg_args)
-//         .output()
-//         .context("Failed to execute FFmpeg command")?;
-
-//     if !output.status.success() {
-//         println!("FFmpeg command failed for command: {}", ffmpeg_args.join(" "));
-
-//         let error_msg = String::from_utf8_lossy(&output.stderr);
-//         println!("FFmpeg error: {}", error_msg);
-//         return Err(anyhow!("FFmpeg error: {}", error_msg));
-//     }
-
-//     let duration = start_time.elapsed();
-//     println!("Slideshow creation completed in {:.2} seconds", duration.as_secs_f64());
-
-//     Ok(())
-// }
 
 fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
     let mut content = String::new();

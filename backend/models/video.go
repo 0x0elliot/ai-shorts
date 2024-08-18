@@ -32,6 +32,8 @@ type Video struct {
 
 	Essence string `json:"essence" gorm:"null"` // the essence of the video
 
+	BackgroundMusic string `json:"backgroundMusic" gorm:"null"`
+
 	// maybe, hide this from the user
 	Error string `json:"error" gorm:"null"`
 

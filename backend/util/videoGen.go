@@ -16,12 +16,12 @@ type StitchingAPIResponse struct {
 	OutputFile string `json:"output_file"`
 }
 
-func StitchVideo(videoID string) (models.Video, error) {
+func StitchVideo(video models.Video) (models.Video, error) {
 	log.Printf("[INFO] Creating slideshow with subtitles..")
 
-	video := models.Video{}
+	videoID := video.ID
 
-	outputURL, err := callStitchingAPI(videoID)
+	outputURL, err := callStitchingAPI(videoID, video.BackgroundMusic)
 	if err != nil {
 		return video, fmt.Errorf("failed to call stitching API: %v", err)
 	}
@@ -56,7 +56,7 @@ func StitchVideo(videoID string) (models.Video, error) {
 	return video, nil
 }
 
-func callStitchingAPI(videoID string) (outputUrl string, err error) {
+func callStitchingAPI(videoID string, musicFile string) (outputUrl string, err error) {
 	req, err := http.NewRequest("POST", "http://127.0.0.1:8080/create_slideshow", nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %v", err)
@@ -64,11 +64,15 @@ func callStitchingAPI(videoID string) (outputUrl string, err error) {
 
 	type SlideshowRequest struct {
 		VideoID string `json:"video_id"`
+		MusicFile string `json:"music"`
 	}
+
+	log.Printf("[INFO] Music file: %v", musicFile)
 
 	// Create the request body
 	slideshowRequest := SlideshowRequest{
 		VideoID: videoID,
+		MusicFile: musicFile,
 	}
 
 	// Marshal the request body
@@ -105,8 +109,16 @@ func callStitchingAPI(videoID string) (outputUrl string, err error) {
 
 	err = json.NewDecoder(res.Body).Decode(&response)
 	if err != nil {
+
+		// just print the response body as text
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(res.Body)
+		body := buf.String()
+		log.Printf("[ERROR] Failed to decode response: %v", body)
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
+
+	log.Printf("[INFO] Output file: %v", response.OutputFile)
 
 	return response.OutputFile, nil
 }

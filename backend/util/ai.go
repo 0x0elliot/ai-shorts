@@ -39,6 +39,10 @@ const (
 	WatercolorStyle ImageStyle = "watercolor"
 )
 
+type PromptResponse struct {
+	DallePrompt string `json:"dalle_prompt"`
+}
+
 type GeneratedImage struct {
 	Sentence string
 	ImageURL string
@@ -94,26 +98,26 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	if recreate {
 		video.Error = ""
-		if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
-			log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
-			videoPtr, err := StitchVideo(video.ID);
-			if err != nil {
-				log.Printf("[ERROR] Error stitching video: %v", err)
-				return nil, SaveVideoError(video, err)
-			}
+		// if video.DALLEPromptGenerated && video.DALLEGenerated && video.TTSGenerated {
+		// 	log.Printf("[INFO] Video already processed. Let's try to stitch it again: %s", video.ID)
+		// 	videoPtr, err := StitchVideo(*video);
+		// 	if err != nil {
+		// 		log.Printf("[ERROR] Error stitching video: %v", err)
+		// 		return nil, SaveVideoError(video, err)
+		// 	}
 
-			video = &videoPtr
+		// 	video = &videoPtr
 
-			// Update video progress
-			video.Progress = 100
-			video.VideoStitched = true
+		// 	// Update video progress
+		// 	video.Progress = 100
+		// 	video.VideoStitched = true
 
-			video, err := SetVideo(video)
-			if err != nil {
-				log.Printf("[ERROR] Error saving video: %v", err)
-				return nil, SaveVideoError(video, err)
-			}
-		}
+		// 	video, err := SetVideo(video)
+		// 	if err != nil {
+		// 		log.Printf("[ERROR] Error saving video: %v", err)
+		// 		return nil, SaveVideoError(video, err)
+		// 	}
+		// }
 
 		folderPath := getVideoFolderPath(video.ID)
 		if err := os.RemoveAll(folderPath); err != nil {
@@ -261,7 +265,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 
 	log.Printf("[INFO] Going to try to stitch video now: %s", video.ID)
 
-	videoPtr, err := StitchVideo(video.ID)
+	videoPtr, err := StitchVideo(*video)
 	if err != nil {
 		log.Printf("[ERROR] Error stitching video: %v", err)
 		return nil, SaveVideoError(video, err)
@@ -546,7 +550,6 @@ func generateImageForPrompt(prompt string, style ImageStyle, numImages int) ([]b
 	return imageData, nil
 }
 
-
 func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) error {
 	srtFilePath := filepath.Join(getVideoFolderPath(video.ID), "subtitles", "subtitles.json")
 	srtContent, err := ioutil.ReadFile(srtFilePath)
@@ -562,7 +565,7 @@ func generateAndSaveImagesForScript(client *openai.Client, video *models.Video) 
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(sentences))
 	// Semaphore to limit the number of concurrent goroutines
-	semaphore := make(chan struct{}, 5) // Adjust this number based on your needs and API rate limits
+	semaphore := make(chan struct{}, 20) // Adjust this number based on your needs and API rate limits
 	folderPath := filepath.Join(getVideoFolderPath(video.ID), "images")
 	if err := os.MkdirAll(folderPath, 0755); err != nil {
 		return fmt.Errorf("error creating images folder: %v", err)
@@ -744,6 +747,87 @@ func generateDallEPromptForSentence(client *openai.Client, formattedSentence str
 	return result.Prompt, nil
 }
 
+// bad function
+func generateDallEPromptsWithClaude(client *anthropic.Client, sentences []string, video *models.Video) ([]string, error) {
+	var lineBrokenSentences string
+	for _, sentence := range sentences {
+		lineBrokenSentences += sentence + "\n"
+	}
+
+	systemMessage := `You are an expert in creating visually appealing and creative DALL-E prompts. Your goal is to generate prompts that result in fun, pretty, and engaging images. Focus on visual elements, atmosphere, and artistic style rather than literal interpretations. Maintain consistency across the entire video narrative.`
+
+	messages := []anthropic.MessageParam{
+		anthropic.NewUserMessage(anthropic.NewTextBlock(fmt.Sprintf(`Generate SDXL prompts for a video with the following details:
+Topic: %s
+Essence: %s
+Video Description: %s
+Style: %s
+
+I will provide you with sentences from the video script. For each sentence, generate a SDXL prompt that captures the essence of that part of the video. Maintain consistency across all prompts to create a cohesive visual narrative.
+
+Guidelines for crafting the prompts:
+1. Create visually striking and cohesive images that capture the essence of each sentence and the overall video.
+2. Use rich, descriptive language to convey mood, lighting, and textures.
+3. Incorporate the specified artistic style and techniques.
+4. Avoid requesting text, specific logos, or sexually explicit content.
+5. Use a format like "[Subject], [Setting], [Mood/Atmosphere], [Style], [Additional details]".
+6. Include relevant details from the topic and description to enhance context.
+7. Specify camera angles, perspectives, or composition when appropriate.
+8. Mention color palettes or lighting conditions that fit the overall theme and style.
+9. Include details about materials, textures, or surface qualities.
+10. Use evocative adjectives and sensory language to make the prompts more vivid.
+11. Specify the desired level of detail or realism.
+12. Keep each prompt concise but descriptive, aiming for 1-2 sentences maximum.
+13. Ensure consistency across all prompts to create a cohesive visual narrative.
+14. IF talking about a person, instruct to keep their mouth closed.
+
+For each sentence I provide, respond with an list containing the SDXL prompt (Must be a simple list. No key/value pairs for EACH sentence. No bullets, or numbering, I will be parsing your response directly. Nothing other than prompts themselves, not even a paragraph briefing on what you're doing. The same number of responses as the sentences provided is very important, even if the line is 1-2 words. Use the context from the last sentence in that case, but respect the rule of equal number of responses). Each sentence is below, separated by a line break:
+%s
+`, video.Topic, video.Essence, video.Description, getStyleInstruction(video.VideoStyle), sentences))),
+	}
+
+	var prompts []string
+
+	message, err := client.Messages.New(context.TODO(), anthropic.MessageNewParams{
+		Model:     anthropic.F(anthropic.ModelClaude_3_5_Sonnet_20240620),
+		MaxTokens: anthropic.Int(1024),
+		System: anthropic.F([]anthropic.TextBlockParam{
+			anthropic.NewTextBlock(systemMessage),
+		}),
+		Messages: anthropic.F(messages),
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("error generating content with Claude: %v", err)
+	}
+
+	if len(message.Content) == 0 || message.Content[0].Type != "text" {
+		return nil, fmt.Errorf("unexpected response format from Claude")
+	}
+
+	// print the response in string
+	log.Println(message.Content[0].Text)
+
+	// Split the response into prompts
+	prompts = strings.Split(message.Content[0].Text, "\n")
+
+	// make sure to remove any empty prompts
+	var cleanedPrompts []string
+	for _, prompt := range prompts {
+		if prompt != "" {
+			cleanedPrompts = append(cleanedPrompts, prompt)
+		}
+	}
+
+	if len(cleanedPrompts) != len(sentences) {
+		log.Printf("Sentences: %d, Prompts: %d", len(sentences), len(cleanedPrompts))
+	
+		return nil, fmt.Errorf("number of prompts generated does not match number of sentences")
+	}
+
+	return cleanedPrompts, nil
+}
+
 func generateDallEPromptForSentenceGemini(formattedSentence string, video *models.Video, lastSentence string) (string, error) {
 	ctx := context.Background()
 	client, err := genai.NewClient(ctx, option.WithAPIKey(os.Getenv("GEMINI_API_KEY")))
@@ -906,7 +990,7 @@ func GenerateScriptClaude(topic, description string) (string, string, string, er
 		),
 	)
 
-	systemMessage := "You are a professional script writer for social media. You write genuinely entertaining reels like a fancy marketing expert"
+	systemMessage := "You are a good script writer for social media reels. Have a personality that reflects in your writing. According to the information provided, choose a personality which is professional or funny or charming or casual. Or a mix of these"
 
 	messages := []anthropic.MessageParam{
 		anthropic.NewUserMessage(anthropic.NewTextBlock(fmt.Sprintf(`Process the following content to create a cleaned topic and script for short-form video:

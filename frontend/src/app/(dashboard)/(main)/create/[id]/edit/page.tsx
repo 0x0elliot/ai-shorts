@@ -11,32 +11,32 @@ import { Button } from '@/components/ui/button'
 import { CheckCircle2, Tag, Clock, Download } from 'lucide-react'
 
 const progressSteps = [
-  { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
-  { key: 'ttsGenerated', label: 'Fixing Timing', slogan: 'Teaching robots to talk like humans...' },
-  { key: 'srtGenerated', label: 'Subtitles', slogan: 'Crafting subtitles for your masterpiece...' },
-  { key: 'dalleGenerated', label: 'Background generation', slogan: 'Summoning the AI art genies...' },
-  { key: 'videoUploaded', label: 'Video Upload', slogan: 'Preparing your masterpiece for its debut...' },
+    { key: 'scriptGenerated', label: 'Script', slogan: 'Crafting a blockbuster script...' },
+    { key: 'ttsGenerated', label: 'Fixing Timing', slogan: 'Teaching robots to talk like humans...' },
+    { key: 'srtGenerated', label: 'Subtitles', slogan: 'Crafting subtitles for your masterpiece...' },
+    { key: 'dalleGenerated', label: 'Background generation', slogan: 'Summoning the AI art genies...' },
+    { key: 'videoUploaded', label: 'Video Upload', slogan: 'Preparing your masterpiece for its debut...' },
 ]
 
 const creativeSlogans = [
-  "Lights, camera, AI-ction!",
-  "Cooking up a visual feast...",
-  "Sprinkling digital stardust...",
-  "Painting with pixels and dreams...",
-  "Turning 1s and 0s into pure magic...",
-  "Mixing imagination and algorithms...",
-  "Crafting tomorrow's memories today...",
-  "Weaving a tapestry of digital wonder...",
+    "Lights, camera, AI-ction!",
+    "Cooking up a visual feast...",
+    "Sprinkling digital stardust...",
+    "Painting with pixels and dreams...",
+    "Turning 1s and 0s into pure magic...",
+    "Mixing imagination and algorithms...",
+    "Crafting tomorrow's memories today...",
+    "Weaving a tapestry of digital wonder...",
 ]
 
 export default function EditCreate() {
     const { toast } = useToast()
     const { id } = useParams()
-    
+
     const handleDownload = async () => {
         if (video.videoURL) {
             try {
-                const response = await fetch(video.videoURL, 
+                const response = await fetch(video.videoURL,
                     {
                         headers: {
                             'Access-Control-Allow-Origin': '*',
@@ -54,7 +54,7 @@ export default function EditCreate() {
                 link.click();
                 window.URL.revokeObjectURL(url);
                 document.body.removeChild(link);
-                
+
                 toast({
                     title: "Download Started",
                     description: "Your video is downloading. Check your downloads folder!",
@@ -89,32 +89,32 @@ export default function EditCreate() {
                 'Authorization': `Bearer ${accessToken}`
             }
         })
-        .then(res => {
-            if (!res.ok) throw new Error('Failed to recreate video')
-            return res.json()
-        })
-        .then(data => {
-            setError(null)
-            setProgress(0)
-            setStatus('Restarting the magic! Hang tight...')
-            setCompletedSteps({})
-            toast({
-                title: "Success",
-                description: "Video recreation started. The show must go on!",
+            .then(res => {
+                if (!res.ok) throw new Error('Failed to recreate video')
+                return res.json()
             })
+            .then(data => {
+                setError(null)
+                setProgress(0)
+                setStatus('Restarting the magic! Hang tight...')
+                setCompletedSteps({})
+                toast({
+                    title: "Success",
+                    description: "Video recreation started. The show must go on!",
+                })
 
-            setTimeout(() => {
-                window.location.reload()
-            }, 2000)
-        })
-        .catch(err => {
-            console.error('Error recreating video:', err)
-            toast({
-                variant: 'destructive',
-                title: 'Error',
-                description: 'Failed to restart the video creation. Our wand needs new batteries!'
+                setTimeout(() => {
+                    window.location.reload()
+                }, 2000)
             })
-        })
+            .catch(err => {
+                console.error('Error recreating video:', err)
+                toast({
+                    variant: 'destructive',
+                    title: 'Error',
+                    description: 'Failed to restart the video creation. Our wand needs new batteries!'
+                })
+            })
     }
 
     // on every progress % update, update the title of the page
@@ -125,7 +125,7 @@ export default function EditCreate() {
             document.title = 'Video Creation Complete!'
         }
     }
-    , [progress])
+        , [progress])
 
     const formatDate = (dateString) => {
         const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' };
@@ -139,7 +139,7 @@ export default function EditCreate() {
             setStatus('Oops! Our magic wand misfired!')
             return
         }
-    
+
         const completed = {}
         progressSteps.forEach(step => {
             if (video[step.key]) {
@@ -149,7 +149,7 @@ export default function EditCreate() {
 
         setCompletedSteps(completed)
         setProgress(video.progress)
-    
+
         if (video.progress === 100) {
             setStatus('Ta-da! Your video masterpiece is ready!')
 
@@ -165,14 +165,14 @@ export default function EditCreate() {
         } else {
             setStatus(creativeSlogans[Math.floor(Math.random() * creativeSlogans.length)])
         }
-    
+
         // const updatedTime = new Date(video.updated_at);
         const updatedTime = new Date(video.updated_at.slice(0, -9));
 
         const now = new Date()
         const minutesSinceUpdation = (now - updatedTime) / (1000 * 60)
 
-        setCanRecreate(minutesSinceUpdation > 10 && video.progress < 100)
+        setCanRecreate(minutesSinceUpdation > 5 && video.progress < 100)
         setCreatedAt(video.created_at)
         setUpdatedAt(video.updated_at)
     }
@@ -185,24 +185,25 @@ export default function EditCreate() {
             fetch(`${siteConfig.baseApiUrl}/api/video/private/${id}`, {
                 headers: {
                     'Authorization': `Bearer ${access_token}`
-                }
+                },
+                method: 'GET'
             })
-            .then(res => {
-                if (!res.ok) throw new Error('Failed to fetch video progress')
-                return res.json()
-            })
-            .then(data => {
-                setVideo(data.video)
-                determineProgress(data.video)
-            })
-            .catch(err => {
-                console.error('Error fetching video progress:', err)
-                toast({
-                    variant: 'destructive',
-                    title: 'Error',
-                    description: 'Our crystal ball is foggy. Retry in a bit!'
+                .then(res => {
+                    if (!res.ok) throw new Error('Failed to fetch video progress')
+                    return res.json()
                 })
-            })
+                .then(data => {
+                    setVideo(data.video)
+                    determineProgress(data.video)
+                })
+                .catch(err => {
+                    console.error('Error fetching video progress:', err)
+                    toast({
+                        variant: 'destructive',
+                        title: 'Error',
+                        description: 'Our crystal ball is foggy. Retry in a bit!'
+                    })
+                })
         }
         fetchProgress()
         intervalRef.current = setInterval(fetchProgress, 5000)
@@ -213,7 +214,7 @@ export default function EditCreate() {
 
     return (
         <div className="max-w-4xl mx-auto p-6 space-y-8">
-            <motion.section 
+            <motion.section
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5 }}
@@ -237,7 +238,7 @@ export default function EditCreate() {
                             <p className="text-red-500 text-lg mb-4">Whoops! We hit a snag in our magic trick:</p>
                             <p className="text-red-400">{error}</p>
                             <p className="mt-4 text-gray-600">Don't worry, our team of wizard debuggers is on it!</p>
-                            <Button 
+                            <Button
                                 onClick={handleRetry}
                                 className="mt-6 bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded"
                             >
@@ -260,15 +261,15 @@ export default function EditCreate() {
                                 </div>
                             )}
                             <div className="w-full bg-gray-200 rounded-full h-4 dark:bg-gray-700 mb-4">
-                                <motion.div 
-                                    className="bg-blue-600 h-4 rounded-full transition-all duration-500" 
-                                    style={{width: `${progress}%`}}
+                                <motion.div
+                                    className="bg-blue-600 h-4 rounded-full transition-all duration-500"
+                                    style={{ width: `${progress}%` }}
                                     initial={{ width: 0 }}
                                     animate={{ width: `${progress}%` }}
                                 />
                             </div>
                             <p className="text-2xl font-bold text-gray-800 dark:text-gray-200 mb-6">{progress}% Complete</p>
-                            
+
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                                 {progressSteps.map((step, index) => (
                                     <div key={index} className="flex flex-col items-center">
@@ -279,6 +280,17 @@ export default function EditCreate() {
                                     </div>
                                 ))}
                             </div>
+
+                            {progress === 100 && (
+                                <div className="flex justify-center items-center mb-4">
+                                    <Button
+                                        onClick={handleRetry}
+                                        className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
+                                    >
+                                        🔄 Recreate Video
+                                    </Button>
+                                </div>
+                            )}
 
                             {progress === 100 && video.videoURL && (
                                 <motion.div
@@ -300,16 +312,6 @@ export default function EditCreate() {
                                         </Button>
                                     </div>
 
-                                    <div className="flex justify-center items-center mb-4">
-                                        <Button 
-                                            onClick={handleRetry}
-                                            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
-                                        >
-                                            🔄 Recreate Video
-                                        </Button>
-
-                                    </div>
-
                                     <video
                                         controls
                                         className="w-full max-w-2xl mx-auto rounded-lg shadow-lg"
@@ -327,7 +329,7 @@ export default function EditCreate() {
                                     className="mt-6"
                                 >
                                     <p className="text-yellow-500 mb-2">Looks like our magic is taking a bit long. Want to try again?</p>
-                                    <Button 
+                                    <Button
                                         onClick={handleRetry}
                                         className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
                                     >

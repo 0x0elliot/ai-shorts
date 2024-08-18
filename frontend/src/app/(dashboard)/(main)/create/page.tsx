@@ -17,6 +17,19 @@ import axios from 'axios'
 export default function Create() {
     const [accessToken, setAccessToken] = useState("");
 
+    const [music, setMusic] = useState('')
+    const [musicTracks] = useState([
+        { name: "Another love", value: "_another-love" },
+        { name: "Bladerunner 2049", value: "_bladerunner-2049" },
+        { name: "Constellations", value: "_constellations" },
+        { name: "Fallen", value: "_fallen" },
+        { name: "Hotline", value: "_hotline" },
+        { name: "Izzamuzzic", value: "_izzamuzzic" },
+        { name: "Nas", value: "_nas" },
+        { name: "Paris else", value: "_paris-else" },
+        { name: "Snowfall", value: "_snowfall" },
+    ])
+
     const [topic, setTopic] = useState('')
     const [description, setDescription] = useState('')
     const [voice, setVoice] = useState('onyx') // Edward as default
@@ -63,6 +76,20 @@ export default function Create() {
         )
     }
 
+
+    const playMusicDemo = () => {
+        if (audioRef.current) {
+            audioRef.current.pause();
+            audioRef.current.currentTime = 0;
+            const selectedTrack = musicTracks.find(track => track.value === music);
+            if (selectedTrack) {
+                const audioPath = `/music/${selectedTrack.value}.mp3`;
+                audioRef.current.src = audioPath;
+                audioRef.current.play();
+            }
+        }
+    };
+    
     const playVoiceDemo = () => {
         if (audioRef.current) {
             audioRef.current.pause()
@@ -95,6 +122,7 @@ export default function Create() {
             videoTheme: videoTheme,
             postingMethod: postingMethod,
             isOneTime: isOneTime,
+            backgroundMusic: music,
         }
 
         // make a request to /api/video/create 
@@ -119,7 +147,7 @@ export default function Create() {
                 })
                 return
             }
-            
+
             // redirect to the edit page
             window.location.href = `/create/${response.data.video.id}/edit`;
 
@@ -178,6 +206,31 @@ export default function Create() {
                             className="text-lg p-4 h-40"
                             required
                         />
+                    </div>
+
+                    <div className="space-y-4">
+                        <Label htmlFor="music" className="text-xl font-semibold flex items-center gap-2">
+                            <Icon icon="ph:music-notes" className="w-6 h-6" />
+                            Choose background music
+                        </Label>
+                        <div className="flex items-center gap-4">
+                            <Select onValueChange={setMusic} value={music}>
+                                <SelectTrigger className="text-lg p-4 flex-grow">
+                                    <SelectValue placeholder="Select a music track" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {musicTracks.map((track) => (
+                                        <SelectItem key={track.value} value={track.value}>
+                                            {track.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <Button onClick={playMusicDemo} disabled={!music} className="whitespace-nowrap">
+                                <Icon icon="ph:play" className="w-6 h-6 mr-2" />
+                                Play Sample
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="space-y-4">

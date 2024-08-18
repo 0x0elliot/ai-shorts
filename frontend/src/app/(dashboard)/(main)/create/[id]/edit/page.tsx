@@ -290,6 +290,16 @@ export default function EditCreate() {
                                         </Button>
                                     </div>
 
+                                    <div className="flex justify-center items-center mb-4">
+                                        <Button 
+                                            onClick={handleRetry}
+                                            className="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded"
+                                        >
+                                            🔄 Recreate Video
+                                        </Button>
+
+                                    </div>
+
                                     <video
                                         controls
                                         className="w-full max-w-2xl mx-auto rounded-lg shadow-lg"

@@ -438,9 +438,9 @@ fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
                         highlighted_chunk.push_str(&format!("{{\\c&H282828&}}{}", w.word));
                     }
                     
-                    // if i < chunk.len() - 1 {
-                    //     highlighted_chunk.push(' ');
-                    // }
+                    if i < chunk.len() - 1 {
+                        highlighted_chunk.push(' ');
+                    }
                 }
 
                 content.push_str(&format!(

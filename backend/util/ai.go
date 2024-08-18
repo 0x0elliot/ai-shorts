@@ -403,7 +403,7 @@ func generateSRTForTTSTranscript(video *models.Video) ([]ASRSentences, error) {
 
 	asrSentences := []ASRSentences{}
 
-	srtContent, err := generateSRTWithWhisper(audioFilePath)
+	srtContent, err := generateSRTWithWhisper(audioFilePath, video.Script)
 	if err != nil {
 		return asrSentences, fmt.Errorf("error generating SRT with Whisper: %v", err)
 	}
@@ -431,7 +431,7 @@ func generateSRTForTTSTranscript(video *models.Video) ([]ASRSentences, error) {
 	return asrSentences, err
 }
 
-func generateSRTWithWhisper(audioFilePath string) (string, error) {
+func generateSRTWithWhisper(audioFilePath string, script string) (string, error) {
 	file, err := os.Open(audioFilePath)
 	if err != nil {
 		return "", fmt.Errorf("error opening audio file: %v", err)
@@ -447,7 +447,11 @@ func generateSRTWithWhisper(audioFilePath string) (string, error) {
 	if _, err = io.Copy(part, file); err != nil {
 		return "", fmt.Errorf("error copying file to form: %v", err)
 	}
+
+	_ = writer.WriteField("original_script", script)
+
 	writer.Close()
+	
 
 	req, err := http.NewRequest("POST", "http://localhost:5000/generate_asr", body)
 	if err != nil {
@@ -915,7 +919,7 @@ Create a cleaned topic and script based on the given topic and description. The 
 Format your response as a JSON object with the following structure:
 {
     "cleaned_topic": "A more attractive and engaging version of the original topic",
-    "script": "A 60-80 second script for the video (150-170 words). Try to include 'uh', 'hmm', 'hehe', 'ah' into the script to make it sound more natural."
+    "script": "A 60-80 second script for the video (150-170 words)."
     "essence": "1-2 word essence of the video for the stock footage"
 }
 

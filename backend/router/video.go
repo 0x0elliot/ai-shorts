@@ -119,7 +119,9 @@ func CreateSchedule(c *fiber.Ctx) error {
 		PostingMethod []string `json:"postingMethod"`
 		IsOneTime bool `json:"isOneTime"`
 		VideoTheme string `json:"videoTheme"`
+		BackgroundMusic string `json:"backgroundMusic"`
 	}
+
 
 	var req CreateScheduleRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -129,6 +131,8 @@ func CreateSchedule(c *fiber.Ctx) error {
 			"message": "Invalid request",
 		})
 	}
+
+	
 
 	// vverify if narrator is valid
 	narrators := []string{"alloy", "echo", "fable", "nova", "onyx", "shimmer"}

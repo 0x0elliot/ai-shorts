@@ -109,12 +109,7 @@ func callStitchingAPI(videoID string, musicFile string) (outputUrl string, err e
 
 	err = json.NewDecoder(res.Body).Decode(&response)
 	if err != nil {
-
-		// just print the response body as text
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(res.Body)
-		body := buf.String()
-		log.Printf("[ERROR] Failed to decode response: %v", body)
+		log.Printf("[ERROR] Failed to decode response: %v", res.Body)
 		return "", fmt.Errorf("failed to decode response: %v", err)
 	}
 

@@ -117,6 +117,7 @@ func CreateVideo(video *models.Video, recreate bool) (*models.Video, error) {
 		// 		log.Printf("[ERROR] Error saving video: %v", err)
 		// 		return nil, SaveVideoError(video, err)
 		// 	}
+		// 	return video, nil
 		// }
 
 		folderPath := getVideoFolderPath(video.ID)

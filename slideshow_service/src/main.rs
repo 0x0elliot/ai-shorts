@@ -116,11 +116,7 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
             "_snowfall",
         ];
 
-        if req.music == "" {
-            return Err(anyhow!("Music is required"));
-        }
-
-        if !allowed_options.contains(&req.music.as_str()) {
+        if !allowed_options.contains(&req.music.as_str()) && !req.music.is_empty() {
             return Err(anyhow!("Invalid music option"));
         }
 
@@ -128,12 +124,12 @@ async fn create_slideshow(req: CreateSlideshowRequest) -> Result<impl warp::Repl
         // i will just copy it in the dockerfile
         let mut music_file = PathBuf::from("/tmp/music/").join(req.music);
 
-        if !music_file.extension().map_or(false, |ext| ext == "mp3") {
+        if !music_file.extension().map_or(false, |ext| ext == "mp3") && (music_file != PathBuf::from("/tmp/music/")) {
             music_file.set_extension("mp3");
         }
 
         if !music_file.exists() {
-            return Err(anyhow!("Music file does not exist!"));
+            return Err(anyhow!("Music file {} does not exist", music_file.to_str().unwrap()));
         }
 
         // Read and parse the subtitles.json file

@@ -1,3 +1,4 @@
 tempfile
 faster_whisper
 flask
+python-Levenshtein

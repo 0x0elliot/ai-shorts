@@ -8,6 +8,7 @@ import (
 
 var USER fiber.Router
 var VIDEO fiber.Router
+var BILLING fiber.Router
 
 func SetupRoutes(app *fiber.App) {
 	app.Use(logger.New())
@@ -27,4 +28,6 @@ func SetupRoutes(app *fiber.App) {
 	VIDEO = api.Group("/video")
 	SetupVideoRoutes()
 
+	BILLING = api.Group("/billing")
+	SetupBillingRoutes()
 }

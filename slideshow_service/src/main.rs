@@ -418,25 +418,6 @@ fn format_time(seconds: f64) -> String {
     format!("{:01}:{:02}:{:02}.{:02}", hours, minutes, secs, centisecs)
 }
 
-// fn create_subtitle_file(asr_data: &ASRData, output_file: &str) -> Result<()> {
-//     let mut content = String::new();
-//     for (i, word) in asr_data.words.iter().enumerate() {
-//         let start = format_time(word.start);
-//         let end = format_time(word.end);
-//         content.push_str(&format!("{}\n{} --> {}\n{}\n\n", i + 1, start, end, word.word));
-//     }
-//     fs::write(output_file, content).context("Failed to write subtitle file")?;
-//     Ok(())
-// }
-
-// fn format_time(seconds: f64) -> String {
-//     let hours = (seconds / 3600.0) as i32;
-//     let minutes = ((seconds % 3600.0) / 60.0) as i32;
-//     let secs = (seconds % 60.0) as i32;
-//     let millis = ((seconds - seconds.floor()) * 1000.0) as i32;
-//     format!("{:02}:{:02}:{:02},{:03}", hours, minutes, secs, millis)
-// }
-
 #[tokio::main]
 async fn main() {
     std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS", "/Users/aditya/Documents/OSS/zappush/shortpro/backend/gcp_credentials.json");

@@ -18,6 +18,21 @@ func GetUserById(id string) (*models.User, error) {
 	return user, nil
 }
 
+func GetActiveSubscriptionByUserID(userID string) (*models.Subscription, error) {
+	subscription := new(models.Subscription)
+	txn := db.DB.Preload("Invoices").Where("user_id = ? AND status = ?", userID, "active").First(&subscription)
+	if txn.Error != nil {
+		if txn.Error.Error() == "record not found" {
+			log.Printf("[INFO] No active subscription found for user: %s", userID)
+			return nil, nil
+		}
+
+		log.Printf("[ERROR] Error getting active subscription: %v", txn.Error)
+		return nil, txn.Error
+	}
+	return subscription, nil
+}
+
 func GetVideosByOwner(ownerID string, newestFirst bool) ([]models.Video, error) {
 	videos := []models.Video{}
 
@@ -70,6 +85,28 @@ func SetVideo(video *models.Video) (*models.Video, error) {
 	}
 
 	return video, nil
+}
+
+func SetCheckoutSession(checkoutSession *models.CheckoutSession) (*models.CheckoutSession, error) {
+	// check if checkout session with ID exists
+	if checkoutSession.ID == "" {
+		checkoutSession.CreatedAt = db.DB.NowFunc().String()
+		checkoutSession.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Omit("User").Create(checkoutSession)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error creating checkout session: %v", txn.Error)
+			return checkoutSession, txn.Error
+		}
+	} else {
+		checkoutSession.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Omit("User").Save(checkoutSession)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error saving checkout session: %v", txn.Error)
+			return checkoutSession, txn.Error
+		}
+	}
+
+	return checkoutSession, nil
 }
 
 func SetUser(user *models.User) (*models.User, error) {

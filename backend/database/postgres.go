@@ -69,5 +69,9 @@ func ConnectToDB() {
 		&models.User{}, 
 		&models.Claims{},
 		&models.Video{},
+
+		// billing
+		&models.Subscription{},
+		&models.CheckoutSession{},
 	)
 }

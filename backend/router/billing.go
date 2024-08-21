@@ -1,13 +1,11 @@
 package router
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"io/ioutil"
 	"log"
-	"net/http"
 	"os"
+	"strings"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -18,6 +16,8 @@ import (
 )
 
 func SetupBillingRoutes() {
+	BILLING.Post("/lemon", HandleLemonSqueezyWebhook)
+
 	privBilling := BILLING.Group("/private")
 	privBilling.Use(auth.SecureAuth())
 
@@ -30,6 +30,102 @@ type CheckoutInput struct {
 	PlanID string `json:"plan_id"`
 	Email  string `json:"email"`
 }
+
+func HandleLemonSqueezyWebhook(c *fiber.Ctx) error {
+	webhookSecret := os.Getenv("LEMONSQUEEZY_WEBHOOK_SECRET")
+	signature := c.Get("X-Signature")
+
+	if !util.VerifyWebhookSignature(c.Body(), signature, webhookSecret) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": true, "message": "Invalid signature"})
+	}
+
+	// print the webhook payload
+	log.Printf("[INFO] Webhook payload: %s", c.Body())
+
+	var webhook util.LemonSqueezyWebhook
+	if err := json.Unmarshal(c.Body(), &webhook); err != nil {
+		log.Printf("[ERROR] Failed to unmarshal webhook payload: %v", err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": true, "message": "Invalid payload"})
+	}
+
+	switch webhook.Meta.EventName {
+	case "subscription_created":
+		return handleSubscriptionCreated(c, &webhook)
+	case "subscription_cancelled":
+		return handleSubscriptionCancelled(c, &webhook)
+	default:
+		log.Printf("[INFO] Unhandled webhook event: %s", webhook.Meta.EventName)
+		return c.SendStatus(fiber.StatusOK)
+	}
+}
+
+func handleSubscriptionCreated(c *fiber.Ctx, webhook *util.LemonSqueezyWebhook) error {
+	userID := webhook.Meta.CustomData.UserID
+
+	user, err := util.GetUserById(userID)
+	if err != nil {
+		log.Printf("[ERROR] Failed to find user: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to process subscription"})
+	}
+
+	log.Printf("[INFO] Product ID: %s", webhook.Data.Attributes.ProductId)
+
+	// convert productID int to string
+	// productID := string(webhook.Data.Attributes.ProductId)
+	productID := fmt.Sprintf("%d", webhook.Data.Attributes.ProductId)
+
+	// variantID := string(webhook.Data.Attributes.VariantId)
+
+	// second word of webhook.Data.Attributes.ProductName is subscription type
+	subscriptionTypeUpper := strings.Split(webhook.Data.Attributes.ProductName, " ")[1]
+	subscriptionType := strings.ToLower(subscriptionTypeUpper)
+
+	// get price 
+	productPlan := models.GetPlanByLemonSqueezyID(productID)
+	if productPlan == nil {
+		log.Printf("[ERROR] Failed to find product: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to process subscription"})
+	}
+
+	subscription := &models.Subscription{
+		UserID:               user.ID,
+		LemonSqueezyID:       productID,
+		Status:               webhook.Data.Attributes.Status,
+		PlanName:             webhook.Data.Attributes.ProductName,
+		PlanSubscriptionType: subscriptionType,
+		PlanCharge:           productPlan.Charge,
+		CurrentPeriodEnd:     webhook.Data.Attributes.RenewsAt,
+	}
+
+	subscription.ID = webhook.Data.ID
+	subscription.CreatedAt = time.Now().UTC().Format("2006-01-02T15:04:05.999Z07:00")
+
+	if _, err := util.SetSubscription(subscription); err != nil {
+		log.Printf("[ERROR] Failed to create subscription: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to process subscription"})
+	}
+
+	return c.SendStatus(fiber.StatusOK)
+}
+
+func handleSubscriptionCancelled(c *fiber.Ctx, webhook *util.LemonSqueezyWebhook) error {
+	subscription, err := util.GetSubscriptionByLemonSqueezyID(webhook.Data.ID)
+	if err != nil {
+		log.Printf("[ERROR] Failed to find subscription: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to process subscription cancellation"})
+	}
+
+	subscription.Status = "cancelled"
+	subscription.CancelAtPeriodEnd = true
+
+	if _, err := util.SetSubscription(subscription); err != nil {
+		log.Printf("[ERROR] Failed to update subscription: %v", err)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to process subscription cancellation"})
+	}
+
+	return c.SendStatus(fiber.StatusOK)
+}
+
 
 func HandleCreateCheckout(c *fiber.Ctx) error {
 	input := new(CheckoutInput)
@@ -54,13 +150,13 @@ func HandleCreateCheckout(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": true, "message": "Plan not found"})
 		
 	}
-	variantID, err := getLemonSqueezyVariants(plan.LemonSqueezyID)
+	variantID, err := util.GetLemonSqueezyVariants(plan.LemonSqueezyID)
 	if err != nil {
 		log.Printf("[ERROR] Error getting variants for product %s: %v\n", plan.LemonSqueezyID, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to get variants"})
 	}
 
-	checkoutSession, err := createLemonSqueezyCheckout(user.Email, variantID[0], userID)
+	checkoutSession, err := util.CreateLemonSqueezyCheckout(user.Email, variantID[0], userID)
 	if err != nil {
 		log.Printf("[ERROR] Failed to create LemonSqueezy checkout: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": true, "message": "Failed to create checkout session"})
@@ -141,132 +237,4 @@ func HandleGetPlans(c *fiber.Ctx) error {
 		"error": false,
 		"plans": allPlans,
 	})
-}
-
-type LemonSqueezyCheckoutResponse struct {
-	Data struct {
-		ID         string `json:"id"`
-		Attributes struct {
-			StoreID       int       `json:"store_id"`
-			CustomerEmail string    `json:"customer_email"`
-			Currency      string    `json:"currency"`
-			Total         int       `json:"total"`
-			ExpiresAt     time.Time `json:"expires_at"`
-			URL           string    `json:"url"`
-		} `json:"attributes"`
-	} `json:"data"`
-}
-
-func getLemonSqueezyVariants(productID string) ([]string, error) {
-	url := fmt.Sprintf("https://api.lemonsqueezy.com/v1/variants?filter[product_id]=%s", productID)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("ACIDRAIN_LEMONSQUEEZY_KEYS")))
-	req.Header.Set("Accept", "application/vnd.api+json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	var response struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, err
-	}
-
-	variantIDs := make([]string, len(response.Data))
-	for i, variant := range response.Data {
-		variantIDs[i] = variant.ID
-	}
-
-	return variantIDs, nil
-}
-
-func createLemonSqueezyCheckout(email string, planID string, userID string) (*LemonSqueezyCheckoutResponse, error) {
-
-	log.Printf("[INFO] Creating LemonSqueezy checkout for user: %s, plan: %s", userID, planID)
-
-	url := fmt.Sprintf("%s/v1/checkouts", "https://api.lemonsqueezy.com")
-	payload := map[string]interface{}{
-		"data": map[string]interface{}{
-			"type": "checkouts",
-			"attributes": map[string]interface{}{
-				"checkout_data": map[string]interface{}{
-					"email": email,
-					"custom": map[string]interface{}{
-						"user_id": userID,
-					},
-				},
-			},
-			"relationships": map[string]interface{}{
-				"store": map[string]interface{}{
-					"data": map[string]interface{}{
-						"type": "stores",
-						"id":   "117377",
-					},
-				},
-				"variant": map[string]interface{}{
-					"data": map[string]interface{}{
-						"type": "variants",
-						"id":   planID,
-					},
-				},
-			},
-		},
-	}
-
-	jsonPayload, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonPayload))
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", os.Getenv("ACIDRAIN_LEMONSQUEEZY_KEYS")))
-	req.Header.Set("Content-Type", "application/vnd.api+json")
-	req.Header.Set("Accept", "application/vnd.api+json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := ioutil.ReadAll(resp.Body)
-	fmt.Println(string(body))
-
-	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("unexpected status code: %d, body: %s", resp.StatusCode, string(body))
-	}
-
-	var checkoutResponse LemonSqueezyCheckoutResponse
-	if err := json.Unmarshal(body, &checkoutResponse); err != nil {
-		return nil, err
-	}
-
-	return &checkoutResponse, nil
 }

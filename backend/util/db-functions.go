@@ -18,6 +18,37 @@ func GetUserById(id string) (*models.User, error) {
 	return user, nil
 }
 
+func GetUserByCheckoutSessionID(checkoutSessionID string) (*models.User, error) {
+	checkoutSession := new(models.CheckoutSession)
+	txn := db.DB.Where("id = ?", checkoutSessionID).Preload("User").First(&checkoutSession)
+	if txn.Error != nil {
+		log.Printf("[ERROR] Error getting user: %v", txn.Error)
+		return nil, txn.Error
+	}
+
+	return &checkoutSession.User, nil
+}
+
+func GetUserByEmail(email string) (*models.User, error) {
+	user := new(models.User)
+	txn := db.DB.Where("email = ?", email).First(&user)
+	if txn.Error != nil {
+		log.Printf("[ERROR] Error getting user: %v", txn.Error)
+		return nil, txn.Error
+	}
+	return user, nil
+}
+
+func GetSubscriptionByLemonSqueezyID(lemonSqueezyID string) (*models.Subscription, error) {
+	subscription := new(models.Subscription)
+	txn := db.DB.Where("lemon_squeezy_id = ?", lemonSqueezyID).First(&subscription)
+	if txn.Error != nil {
+		log.Printf("[ERROR] Error getting subscription: %v", txn.Error)
+		return nil, txn.Error
+	}
+	return subscription, nil
+}
+
 func GetActiveSubscriptionByUserID(userID string) (*models.Subscription, error) {
 	subscription := new(models.Subscription)
 	txn := db.DB.Preload("Invoices").Where("user_id = ? AND status = ?", userID, "active").First(&subscription)
@@ -85,6 +116,27 @@ func SetVideo(video *models.Video) (*models.Video, error) {
 	}
 
 	return video, nil
+}
+
+func SetSubscription(subscription *models.Subscription) (*models.Subscription, error) {
+	if subscription.ID == "" {
+		subscription.CreatedAt = db.DB.NowFunc().String()
+		subscription.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Omit("User").Create(subscription)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error creating subscription: %v", txn.Error)
+			return subscription, txn.Error
+		}
+	} else {
+		subscription.UpdatedAt = db.DB.NowFunc().String()
+		txn := db.DB.Omit("User").Save(subscription)
+		if txn.Error != nil {
+			log.Printf("[ERROR] Error saving subscription: %v", txn.Error)
+			return subscription, txn.Error
+		}
+	}
+
+	return subscription, nil
 }
 
 func SetCheckoutSession(checkoutSession *models.CheckoutSession) (*models.CheckoutSession, error) {

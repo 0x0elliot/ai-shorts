@@ -172,7 +172,7 @@ export default function BillingPage() {
 
         const isYearly = currentPlan.yearlyPlanId === billingInfo.lemon_squeezy_id;
         const price = isYearly ? currentPlan.yearlyPrice : currentPlan.monthlyPrice;
-        const cycle = isYearly ? 'year' : 'month';
+        const cycle = billingInfo.plan_subscription_type
 
         return {
             name: currentPlan.name,
@@ -266,9 +266,9 @@ export default function BillingPage() {
                                     <Button 
                                         onClick={() => handleUpgrade(tier)} 
                                         className="w-full bg-green-500 hover:bg-green-600"
-                                        disabled={currentPlan?.name === tier.name || tier.monthlyPrice === 0}
+                                        disabled={currentPlan?.name === tier.name && currentPlan.cycle === billingCycle || tier.monthlyPrice === 0}
                                     >
-                                        {currentPlan?.name === tier.name ? 'Current Plan' : `Upgrade to ${tier.name}`}
+                                        {currentPlan?.name === tier.name && currentPlan.cycle === billingCycle ? 'Current Plan' : `Upgrade to ${tier.name}`}
                                         {currentPlan?.name !== tier.name && <ArrowRight className="ml-2" size={16} />}
                                     </Button>
                                 )}
